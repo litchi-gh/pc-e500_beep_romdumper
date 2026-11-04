@@ -337,7 +337,7 @@ These were measured during development on the PC-U6000 recordings. Each row adds
 | Bit repair | 1017 | 507 |
 | Other analysis patterns | 1024 | 512 |
 
-Neither had any wrong data, and the 384KB from the two recordings together matches `PC-U6000(8.4).ROM` byte for byte.
+Neither had any wrong data, and the 384KB from the two recordings together matches the ROM image at hand byte for byte.
 
 ## Tolerance of recording devices
 

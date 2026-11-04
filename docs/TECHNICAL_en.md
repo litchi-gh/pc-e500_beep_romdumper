@@ -122,9 +122,9 @@ Recording devices capture sound differently, so there are 11 analyses that vary 
 
 | Version | Model | Recording | Result |
 |---|---|---|---|
-| Machine code | PC-E500 | All main ROM, 15.3 min, audio of an iPhone video | 1024 / 1024 blocks. Byte-exact with `PC-E500(3.2).ROM` |
+| Machine code | PC-E500 | All main ROM, 15.3 min, audio of an iPhone video | 1024 / 1024 blocks. Byte-exact with the ROM image at hand |
 | Machine code | PC-U6000 | All main ROM, 15.5 min, audio of an iPhone video | 1024 / 1024 blocks (17 repaired). No wrong data |
-| Machine code | PC-U6000 | All extension ROM, 8.1 min, audio of an iPhone video | 512 / 512 blocks. With the main ROM, 384KB byte-exact with `PC-U6000(8.4).ROM` |
+| Machine code | PC-U6000 | All extension ROM, 8.1 min, audio of an iPhone video | 512 / 512 blocks. With the main ROM, 384KB byte-exact with the ROM image at hand |
 | BASIC | PC-E500 | Stopped at 30 min (73KB) | 276 of 286 blocks (9 repaired). No wrong data in what was read |
 
 The BASIC reading was tuned on this recording, so other recordings may not reach the same accuracy.
@@ -139,11 +139,11 @@ Not verified on real hardware:
 
 ### Emulator
 
-`BEEPFAST.BAS` was `LOAD`ed and `BEEPDUMP.TXT` typed in and run, on all 11 ROM versions of the 7 models at hand (with 32KB and 64KB of RAM; 64KB only on the PC-E650 and PC-U6000).
+`BEEPFAST.BAS` was `LOAD`ed and `BEEPDUMP.TXT` typed in and run, on the ROMs of all 7 models at hand (with 32KB and 64KB of RAM; 64KB only on the PC-E650 and PC-U6000).
 
 - **Machine code:** the 8 blocks from `FF000` to `FF7FF`. All matched the ROM, both decoding the sound directly and reading it with BeepDump.
 - **BASIC:** the 3 blocks from `FF000` to `FF2FF`. BeepDump read 2 or 3 blocks, with no errors.
-- **`BEEPDUMP.BAS`:** `LOAD`ed and run on a PC-E500 (version 3.2) and a PC-U6000, with the same result as the BASIC version.
+- **`BEEPDUMP.BAS`:** `LOAD`ed and run on a PC-E500 and a PC-U6000, with the same result as the BASIC version.
 
 The emulator's timing differs from real hardware (see "Timing" above), so it says nothing about speed.
 

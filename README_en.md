@@ -10,9 +10,9 @@ ROMDump copies the built-in ROM of a Sharp PC-E500 series pocket computer to a P
 
 **This is an experimental application and has not been sufficiently verified.** Use it at your own risk. There is no guarantee that it works.
 
-- **Very little has been tested on real hardware.** The machine-code version was run on one PC-E500 and one PC-U6000, reading one recording of each range. The results matched `PC-E500(3.2).ROM` and `PC-U6000(8.4).ROM` (384KB) byte for byte. The BASIC version has only been run part of the way, on a PC-E500. Other models, such as the PC-E650, have not been run on real hardware.
+- **Very little has been tested on real hardware.** The machine-code version was run on one PC-E500 and one PC-U6000, reading one recording of each range. The results matched the ROM images at hand byte for byte (384KB on the PC-U6000). The BASIC version has only been run part of the way, on a PC-E500. Other models, such as the PC-E650, have not been run on real hardware.
 - **The only recording device tested is iPhone video.** Other devices have only been tried by processing a recording. The reading was also tuned on these few recordings.
-- **Data that reads successfully is not guaranteed to be correct.** Only the check values can confirm it. On a ROM version with nothing to compare against, a remaining error would go unnoticed. During development, wrong data did pass the check on the BASIC version. That was addressed, but it cannot be said to be gone. For certainty, use the machine-code version, and record twice to confirm the two agree.
+- **Data that reads successfully is not guaranteed to be correct.** Only the check values can confirm it. With nothing to compare against, a remaining error would go unnoticed. During development, wrong data did pass the check on the BASIC version. That was addressed, but it cannot be said to be gone. For certainty, use the machine-code version, and record twice to confirm the two agree.
 - **Back up anything important first.** If a typing mistake slips through, the machine-code version can crash the machine and need a reset. It plays for a long time, so use fresh batteries or an AC adapter.
 - **Some environments have not been run.** The macOS version, the Linux Arm64 version, and reading through the real ffmpeg are untested (see the [installation guide](docs/INSTALL_en.md)).
 
@@ -22,24 +22,18 @@ If something does not work, or you confirm something new, please tell us in [Iss
 
 **This is only for the Sharp PC-E500 series of pocket computers,** the models below with an SC62015 (ESR-L) CPU. It does not work on other pocket computers, such as the PC-1350 or PC-G850.
 
-| Model | ROM versions checked | ROM read | Saved file | On real hardware |
-|---|---|---|---|---|
-| PC-E500 | 2.2, 3.2, 5.3, 6.3, 7.2 | Main | 256KB | On version 3.2: machine code in full, BASIC part of the way |
-| PC-E500PJ | 6.2 | Main | 256KB | None |
-| PC-1480U | 2.1 | Main | 256KB | None |
-| PC-1490UII | 6.4 | Main | 256KB | None |
-| PC-E550 | 7.5 | Main | 256KB | None |
-| PC-E650 | 8.5 | Main + extension | 384KB | None |
-| PC-U6000 | 8.4 | Main + extension | 384KB | On version 8.4: machine code in full |
+| Model | ROM read | Saved file | On real hardware |
+|---|---|---|---|
+| PC-E500 | Main | 256KB | Machine code in full, BASIC part of the way |
+| PC-E500PJ | Main | 256KB | None |
+| PC-1480U | Main | 256KB | None |
+| PC-1490UII | Main | 256KB | None |
+| PC-E550 | Main | 256KB | None |
+| PC-E650 | Main + extension | 384KB | None |
+| PC-U6000 | Main + extension | 384KB | Machine code in full |
 
-- **Checked on the emulator:** both programs were run on all 11 versions of these 7 models, and the resulting sound was read with BeepDump and compared with the ROM. All 8 blocks tried on the machine-code version matched, and the blocks read on the BASIC version had no errors (with 32KB and 64KB of RAM; 64KB only on the PC-E650 and PC-U6000). Only part of the end of each ROM was tried, and the emulator's timing differs from real hardware.
-- **Other models and versions:** they may work, but have not been checked.
-
-BASIC can tell you the version. `7  2` means version 7.2.
-
-```basic
-PRINT PEEK &HFFFF0;PEEK &HFFFF1
-```
+- **Checked on the emulator:** both programs were run on all 7 of these models, and the resulting sound was read with BeepDump and compared with the ROM. All 8 blocks tried on the machine-code version matched, and the blocks read on the BASIC version had no errors (with 32KB and 64KB of RAM; 64KB only on the PC-E650 and PC-U6000). Only part of the end of each ROM was tried, and the emulator's timing differs from real hardware.
+- **Other models:** they may work, but have not been checked.
 
 ## Which version to use
 
