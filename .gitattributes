@@ -1,0 +1,4 @@
+*.BAS binary
+*.TXT -text
+*.png binary
+*.jpg binary

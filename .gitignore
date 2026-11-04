@@ -1,0 +1,8 @@
+BeepDump/app/*.exe
+BeepDump/app/cli/
+bin/
+obj/
+*.user
+.vs/
+__pycache__/
+*.zip
