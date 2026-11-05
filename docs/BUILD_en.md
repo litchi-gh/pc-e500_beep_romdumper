@@ -133,7 +133,7 @@ The application build does not need these. They are only for making changes. Run
 |---|---|---|
 | Machine code, listings, listing images, and the listings in the READMEs | `py fast\build.py` | Python, Pillow (`py -m pip install pillow`), `e500asm.exe`, `ce140conv.exe`, and the Windows fonts Consolas and Meiryo |
 | Figures | `py docs\figures\build_figures.py` | Python |
-| Figure data | `py docs\figures\extract_data.py` | Python, NumPy, SciPy, and real recordings (not in the repository) |
+| Figure data | `py docs\figures\extract_data.py WORKDIR ROMDIR` | Python, NumPy, SciPy, real recordings, reference ROMs, and their analysis output (none in the repository). `data.json` is normally used as it is |
 
 ## Troubleshooting
 

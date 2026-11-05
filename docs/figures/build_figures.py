@@ -138,7 +138,7 @@ def overview():
     y = 26
     centers = (86, 250, 424, 588, 770)
     captions = [
-        (L('1. プログラムを打ち込む', '1. Type in the program'), L('機械語版は 18 行', '18 lines (machine code)')),
+        (L('1. プログラムを打ち込む', '1. Type in the program'), L('機械語版は 21 行', '21 lines (machine code)')),
         (L('2. RUN で ROM を鳴らす', '2. RUN plays the ROM'), L('ブザーの音で流れる', 'on the buzzer')),
         (L('3. スマホで録音', '3. Record with a phone'), L('録画でもよい', 'video is fine too')),
         (L('4. BeepDump で読む', '4. Read with BeepDump'), L('音をデータに戻す', 'sound back to data')),

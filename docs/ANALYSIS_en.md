@@ -253,6 +253,8 @@ The BASIC address is recovered from the check values and "address ÷ 5000". Misr
 
 So the address is decided by a vote among the 16 blocks on each side. Block positions are counted from the number of tones, so even two joined blocks do not throw off the count.
 
+If the address has fewer than 2 votes, or not more than twice the votes against it, it counts as unconfirmed and the block as not read. In a short recording, misreadings can lean the same way, and a shifted address can win 2 to 1. Short retakes may therefore go unread, so the application shows a range that starts 2 blocks before what is missing and covers at least 8 blocks.
+
 ### 6.5 Learning quirks
 
 Blocks that pass the check teach these for each value. Values that do not appear are filled in from nearby values.
@@ -291,9 +293,9 @@ Replacing two or more tones is not tried, because on a real recording that accep
 `Analyze` in [Analyzer.cs](../BeepDump/src/BeepDump.Core/Analyzer.cs)
 
 - Patterns run in order, stopping when blocks are contiguous and none is unread.
-- For each block, votes are split by content, with 2 votes for one that passed as read and 1 for one repaired. A tie means not read.
+- A block that differs between patterns counts as not read. The patterns read the same audio, so agreement among more of them confirms nothing.
 - From the second pattern on, the machine-code version reads only blocks still missing, whose addresses follow from the order of blocks. About 32 blocks from across the recording are also read as learning material.
-- The BASIC version learns timing from all tones, so it reads everything each time. Once it has read any blocks, it only uses the patterns that change the channel or smooth the level (2, 3, and 4).
+- The BASIC version learns timing from all tones, so it reads everything each time. Once it has read any blocks, it only uses the patterns that change the channel or smooth the level (2, 3, and 4). A block read only by a non-standard pattern (5 to 9) does not turn green even if it passes the check.
 - Three patterns in a row with no gain end the analysis, because a part ruined by noise will not be readable by another pattern. While nothing has been read, every pattern is tried.
 
 ## 8. Combining the recordings
@@ -303,9 +305,11 @@ Replacing two or more tones is not tried, because on a real recording that accep
 | Situation | What happens |
 |---|---|
 | A block read for the first time | Used as it is |
-| Same content as before | A repaired block is replaced by one that passed as read |
-| Different content, one of them repaired | The one that passed as read is used |
-| Different content, both treated alike | Both are held back and shown red. The content that agrees in a later recording is used |
+| Same content as before | It turns green, because another recording agrees. This includes repaired blocks and blocks whose address could not be confirmed |
+| Different content | Both are held back and shown red, whether green or yellow |
+| A held-back block is read again | The new content is used, and turns green, once it has appeared at least twice and more often than any other. A tie stays held back |
+
+A recording is counted only once. Files are compared by content, so a renamed copy is recognized. A converted copy cannot be recognized, and does not confirm anything.
 
 ## Summary of protection against errors
 
@@ -316,11 +320,11 @@ Replacing two or more tones is not tried, because on a real recording that accep
 | A misread upper address | Continuity with nearby blocks | Machine code |
 | Reading silence as all 0 | Confirming the sound is explained | Machine code |
 | Repair passing by accident | At most 2 flipped bits, and the address must match | Machine code |
-| A shifted address | A vote among 16 blocks on each side | BASIC |
+| A shifted address | A vote among 16 blocks on each side. Too few votes means not read | BASIC |
 | Every tone off by one | How the scale is chosen, and the bias check | BASIC |
 | Canceling misreadings | Checking against duration and interval | BASIC |
 | Repair passing by accident | One tone only, and only if it is the sole candidate | BASIC |
-| Disagreement between patterns or recordings | Majority vote and holding back | Both |
+| Disagreement between patterns or recordings | Between patterns, the block counts as not read. Between recordings, it is held back until the new content leads | Both |
 
 **Weaknesses that remain:** the BASIC check is a sum, so a misreading might still get past all of these. For certainty, use the machine-code version or two recordings. On the machine-code version, an error that passes both the check and address continuity cannot be ruled out either, although none has occurred on real recordings so far.
 
@@ -360,7 +364,7 @@ This used a 4-minute recording (about 35 blocks).
 ![Blocks read for each processing condition. Many read about 30. Cutting above 4 kHz leaves 4, and strong reverberation cannot be read](figures/devices_basic_en.svg)
 
 - **How much is read:** about 30 blocks in many conditions. Cutting above 4 kHz, clipping, and mains hum reduce it sharply. Strong reverberation could not be read in the time allowed.
-- **Errors:** the check is weak, so wrong data passed in some conditions: 3 bytes with multiple patterns at a 16 kHz sample rate, and 2 bytes with the standard pattern alone at 22 kHz and with the clock off. The last two became 0 with the majority vote of multiple patterns.
+- **Errors:** the check is weak, so reading with the standard pattern alone (`--single`) let wrong data pass in some conditions: 2 bytes each at a 22 kHz sample rate and with the clock off. With multiple patterns (the default), sample rates of 44, 22, and 16 kHz and the clock offset all gave 0. A recording below a 32 kHz sample rate does not turn green even if it passes the check.
 
 For certainty, use the machine-code version or two recordings.
 

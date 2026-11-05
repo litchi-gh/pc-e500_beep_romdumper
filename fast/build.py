@@ -5,7 +5,8 @@ CE-140F で LOAD する ../BASIC/BEEPFAST.BAS と ../BASIC/BEEPDUMP.BAS を作�
 
 README のプログラムのリストと、40 文字で折り返したリストの画像（../BASIC/*.png、Pillow が必要）も作り直す。
 DATA は 1 行 PER_LINE バイトの 16 進と、その和。PC 側が学習に使う機械語の先頭も BeepDump.Core/FastCode.cs に書き出す。
-打ち間違えた行は RUN したときに NG と表示される。
+打ち間違えた行と抜けた行、逆の番地は RUN したときに NG と表示される。終了番地を含むブロックまで読む。
+機械語の領域を確保していなければ、システムの作業領域を壊さないように POKE する前に止まる（[BFD1Ah] は領域の下端）。
 1 行目は行番号のない命令で、機械語の領域を確保する（一度だけ実行すればよい）。
 """
 import html
@@ -39,12 +40,15 @@ DELAY = 130            # 半ビットの待ち。実機で約 2400 bps
 ALLOCATE = 'POKE &HBFE03,&H1A,&HFD,&HB,0,2,0:CALL &HFFFD8'
 
 PROGRAM = '''\
-10 INPUT A,E:E=E+1:P=&HBFA00:POKE &HBFBE0,0,A/256 AND 255,A/65536,0,E/256 AND 255,E/65536 AND 15,{delay},0
+5 IF PEEK &HBFD1B>&HFA THEN PRINT "POKE LINE FIRST":END
+10 INPUT A,E:IF A>E GOTO 45
+15 E=E+256:P=&HBFA00:POKE &HBFBE0,0,A/256 AND 255,A/65536,0,E/256 AND 255,E/65536 AND 15,{delay},0
 20 READ D$,C:IF D$="" GOTO 50
-30 S=0:FOR I=1 TO LEN D$ STEP 2:V=VAL ("&H"+MID$ (D$,I,2)):POKE P,V:P=P+1:S=S+V:NEXT
+30 S=0:FOR I=1 TO LEN D$ STEP 2:V=VAL ("&H"+MID$ (D$,I,2)):POKE P,V:P=P+1:S=S+V*I:NEXT
 40 IF S=C GOTO 20
 45 PRINT "NG ";D$:END
-50 CALL &HBFA00
+50 IF P<>&H{end:X} GOTO 45
+55 CALL &HBFA00
 '''
 
 
@@ -56,11 +60,13 @@ def assemble():
 
 
 def listing(template, code):
-    lines = [ALLOCATE] + template.format(delay=DELAY).splitlines()
+    # DATA の行を飛ばしても和の検査は通るので、全体の長さも確かめてから CALL する
+    lines = [ALLOCATE] + template.format(delay=DELAY, end=0xBFA00 + len(code)).splitlines()
     number = FIRST_DATA
     for i in range(0, len(code), PER_LINE):
         chunk = code[i:i + PER_LINE]
-        lines.append(f'{number} DATA "{chunk.hex().upper()}",{sum(chunk)}')
+        # 和には文字の位置の重みを付ける。バイトを入れ替えても通らないように
+        lines.append(f'{number} DATA "{chunk.hex().upper()}",{sum(b * (2 * k + 1) for k, b in enumerate(chunk))}')
         number += 10
     lines.append(f'{number} DATA "",0')
     return '\n'.join(lines) + '\n'
@@ -125,8 +131,8 @@ def main():
     with tempfile.TemporaryDirectory() as folder:
         numbered = Path(folder) / 'BEEPFAST.TXT'
         numbered.write_text(text.split('\n', 1)[1], encoding='ascii', newline='\r\n')
-        subprocess.run([str(CONV), 'text2bas', str(numbered), str(BASIC / 'BEEPFAST.BAS')], check=True)
-    subprocess.run([str(CONV), 'text2bas', str(BASIC / 'BEEPDUMP.TXT'), str(BASIC / 'BEEPDUMP.BAS')], check=True)
+        subprocess.run([str(CONV), 'text2bas', '--no-eof', str(numbered), str(BASIC / 'BEEPFAST.BAS')], check=True)
+    subprocess.run([str(CONV), 'text2bas', '--no-eof', str(BASIC / 'BEEPDUMP.TXT'), str(BASIC / 'BEEPDUMP.BAS')], check=True)
     learn = ', '.join(f'0x{b:02X}' for b in code[:128])
     (HERE.parent / 'BeepDump/src/BeepDump.Core/FastCode.cs').write_text(
         'namespace BeepDump.Core;\n\n'

@@ -46,54 +46,76 @@ public static class Analyzer
         var failed = new HashSet<int>();
         var notes = new List<string>();
         var used = new List<string>();
+        var firstNotes = new List<string>();     // 1 つも読めなかったときは、最初のパターンの理由を伝える
         double scale = 0, overhead = 0;
         int tones = 0, number = 0, idle = 0;
         bool fast = false;
+        Exception? error = null;
         foreach (var pattern in patterns)
         {
             int index = number++;
             // 機械語版は先読みを増やす意味があるが、BASIC 版にはないので飛ばす
-            if (pattern.Lookahead != 3 && votes.Count > 0 && !fast) continue;
+            if (pattern.Lookahead != 3 && !fast) continue;
             // BASIC 版の検査は和で弱く、受け入れの判定は標準の音に合わせてある。音の中身や区切り方を変えると、和の変わらない読み違いが判定をすり抜ける
             // （実機の録音とその加工で、左右の差、高域通過、検出のしきい値を変えたパターンで誤ったデータが通った）。何も読めていないときだけ使う
             if (votes.Count > 0 && !fast && (pattern.Cutoff != StandardCutoff || pattern.Channel == ChannelMix.Difference || pattern.Relative != StandardRelative)) continue;
-            var samples = Prepare(audio, pattern);
-            // 版の判別は最初に読めたパターンで決める。加工された音では、BASIC 版の音が別のパターンで機械語版に見えることがある
-            if (votes.Count == 0) fast = FastDecoder.LooksFast(samples, audio.Rate, pattern.Relative);
-            // 機械語版は、ほかのパターンですでに読めたブロックを読まない（BASIC 版は全部の音から時間を学ぶので、全部読む）
-            var result = Decoder.Decode(samples, audio.Rate, (text, f) => progress?.Invoke($"{text} ({index + 1}/{patterns.Length}: {pattern.Label})", (index + f) / patterns.Length),
-                index == 0 ? trace : null, knownScale, pattern.Relative, pattern.Lookahead, votes.Count > 0 ? address => !votes.ContainsKey(address) : null);
+            DecodeResult result;
+            try
+            {
+                var samples = Prepare(audio, pattern);
+                // 版の判別は最初に読めたパターンで決める。加工された音では、BASIC 版の音が別のパターンで機械語版に見えることがある
+                if (votes.Count == 0) fast = FastDecoder.LooksFast(samples, audio.Rate, pattern.Relative);
+                // 機械語版は、ほかのパターンですでに読めたブロックを読まない（BASIC 版は全部の音から時間を学ぶので、全部読む）
+                result = Decoder.Decode(samples, audio.Rate, (text, f) => progress?.Invoke($"{text} ({index + 1}/{patterns.Length}: {pattern.Label})", (index + f) / patterns.Length),
+                    index == 0 ? trace : null, knownScale, pattern.Relative, pattern.Lookahead, votes.Count > 0 ? address => !votes.ContainsKey(address) : null, fast);
+            }
+            catch (Exception e)
+            {
+                // メモリ不足などで止まっても、読めたブロックは捨てない。何も読めていなければ、ほかのパターンを試す
+                if (votes.Count == 0) { error ??= e; continue; }
+                notes.Add(Messages.Pick($"「{pattern.Label}」の途中でエラーになったので、ここまでの結果を使います: {e.GetBaseException().Message}", $"An error stopped \"{pattern.Label}\", so the results so far are used: {e.GetBaseException().Message}"));
+                break;
+            }
+            // 誤りが通りやすいパターンでしか読めなかったブロックは、検査が通っても緑にしない
+            bool risky = !fast && (pattern.Cutoff != StandardCutoff || pattern.Channel == ChannelMix.Difference || pattern.Relative != StandardRelative);
             int before = votes.Count;
             foreach (var block in result.Blocks)
             {
                 if (block.State == BlockState.Failed) { failed.Add(block.Address); continue; }
                 if (!votes.TryGetValue(block.Address, out var list)) votes[block.Address] = list = [];
-                list.Add(block);
+                list.Add(risky && block.State == BlockState.Good ? block with { State = BlockState.Repaired } : block);
             }
             if (votes.Count > before) used.Add($"{pattern.Label} {votes.Count - before}");
-            if (result.Scale > 0) { if (scale == 0) scale = result.Scale; if (knownScale == 0) knownScale = result.Scale; overhead = result.Overhead; }
+            if (risky && votes.Count > before) notes.Add(Messages.Pick("BASIC 版を標準以外のパターンで読みました。誤りが通りやすいので、もう 1 回録音して確かめてください。", "The BASIC version was read with a non-standard pattern, where errors pass more easily. Record it again to confirm."));
+            // 検査の通らなかった倍率は不確かなので、後のパターンの基準にしない
+            if (result.Scale > 0 && result.Blocks.Any(b => b.State == BlockState.Good)) { if (scale == 0) scale = result.Scale; if (knownScale == 0) knownScale = result.Scale; overhead = result.Overhead; }
             tones = Math.Max(tones, result.ToneCount);
-            if (notes.Count == 0) notes.AddRange(result.Notes.Where(n => n.Contains("bps")));
+            if (votes.Count > before) notes.AddRange(result.Notes.Where(n => !notes.Contains(n)));
+            else if (index == 0) firstNotes = result.Notes;
             if (Complete(votes, failed)) break;
             // 読めない所が物音で潰れていれば、ほかのパターンでも読めない。長い録音で時間をかけすぎない
             idle = votes.Count > before ? 0 : idle + 1;
             if (votes.Count > 0 && idle >= IdlePatterns) break;
         }
 
+        if (votes.Count == 0 && failed.Count == 0 && error != null) throw error;
+
         var blocks = new List<Block>();
         foreach (var (address, list) in votes.OrderBy(v => v.Key))
         {
-            var groups = list.GroupBy(b => Convert.ToHexString(b.Data)).Select(g => (Votes: g.Sum(b => b.State == BlockState.Good ? 2 : 1), Block: g.OrderBy(b => b.State).First())).OrderByDescending(g => g.Votes).ToArray();
-            if (groups.Length > 1 && groups[0].Votes == groups[1].Votes)
+            var groups = list.GroupBy(b => Convert.ToHexString(b.Data)).Select(g => g.OrderBy(b => b.State).First()).ToArray();
+            // パターンは同じ音声を読むので、数が多くても確認にならない。食い違えばどれも信用しない
+            if (groups.Length > 1)
             {
                 notes.Add(Messages.Pick($"{address:X5} はパターンによって内容が違いました。", $"{address:X5} differed between patterns."));
                 blocks.Add(new(address, BlockState.Failed, []));
                 continue;
             }
-            blocks.Add(groups[0].Block);
+            blocks.Add(groups[0]);
         }
         foreach (int address in failed.Where(a => !votes.ContainsKey(a)).OrderBy(a => a)) blocks.Add(new(address, BlockState.Failed, []));
         blocks.Sort((a, b) => a.Address.CompareTo(b.Address));
+        if (votes.Count == 0) notes.AddRange(firstNotes);
         if (used.Count > 0) notes.Add(Messages.Pick("読めたパターン: ", "Patterns that read blocks: ") + string.Join(Messages.Pick("、", ", "), used));
         if (blocks.Count == 0) notes.Add(Messages.Pick("どのパターンでも読めませんでした。音量が小さいか、録音機材の雑音消し（ノイズ抑制）で音が消えているかもしれません。", "No pattern could read this recording. The level may be too low, or the recorder's noise suppression may have removed the tones."));
         return new(blocks, scale, overhead, tones, notes);

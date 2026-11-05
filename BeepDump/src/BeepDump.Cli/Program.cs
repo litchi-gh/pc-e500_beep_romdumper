@@ -11,6 +11,7 @@ Usage:
 
 Options for decode:
   -o, --output FILE   ROM file to write (default: beepdump.rom)
+      --force         Overwrite the ROM file if it already exists
   -m, --model MODEL   e500: main ROM, 256KB (default; PC-E500, PC-E500PJ,
                             PC-E550, PC-1480U, PC-1490UII)
                       e650: extension + main ROM, 384KB (PC-E650, PC-U6000)
@@ -25,7 +26,8 @@ Recordings: WAV is always readable. Other formats (MOV, MP4, M4A, ...) use Media
 Foundation on Windows and need ffmpeg on the PATH on Linux and macOS.
 
 Several recordings fill each other's gaps. Exit code: 0 = every block was read,
-1 = some are missing (the ROM is still written, with FFh there), 2 = error.
+1 = some are missing (the ROM is still written, with FFh there), 2 = error
+(a recording could not be read, or nothing was read).
 """;
 
 if (args.Length == 0 || args[0] is "-h" or "--help" or "help") { Console.WriteLine(Usage); return args.Length == 0 ? 2 : 0; }
@@ -39,9 +41,9 @@ try
         _ => Fail($"Unknown command: {args[0]}"),
     };
 }
-catch (Exception e) when (e is IOException or UnauthorizedAccessException or OutOfMemoryException)
+catch (Exception e)
 {
-    return Fail(e.Message);
+    return Fail(e.GetBaseException().Message);
 }
 
 static int Fail(string message)
@@ -67,6 +69,7 @@ static int Decode(string[] args)
 {
     var files = new List<string>();
     string output = "beepdump.rom";
+    bool force = false, trouble = false;
     string? tracePath = null;
     var model = RomModel.Main256;
     bool single = false, quiet = false;
@@ -77,6 +80,7 @@ static int Decode(string[] args)
         switch (a)
         {
             case "-o" or "--output": output = Next(); break;
+            case "--force": force = true; break;
             case "--trace": tracePath = Next(); break;
             case "--single": single = true; break;
             case "-q" or "--quiet": quiet = true; break;
@@ -91,9 +95,17 @@ static int Decode(string[] args)
         }
     }
     if (files.Count == 0) return Fail("No recordings were given.");
+    // 録り直しの読み込みで、前に書いた ROM を FFh だらけで上書きしないように
+    if (!force && File.Exists(output)) return Fail($"{output} already exists. To add a retake, give all the recordings together, and use --force to overwrite it.");
+
+    // 長い解析の後で書けないと分かることがないように、先に確かめる
+    bool existed = File.Exists(output);
+    using (new FileStream(output, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read)) { }
+    if (!existed) File.Delete(output);
 
     var image = new RomImage();
     double knownScale = 0;
+    var seen = new HashSet<string>();
     using var trace = tracePath == null ? null : new StreamWriter(tracePath);
     foreach (string file in files)
     {
@@ -105,25 +117,69 @@ static int Decode(string[] args)
             Console.Error.Write(line.PadRight(Math.Max(line.Length, lastText.Length)));
             lastText = line;
         }
-        var audio = AudioFile.Load(file, f => Show("Loading audio", f));
-        var result = single
-            ? Decoder.Decode(Analyzer.Prepare(audio, Analyzer.Patterns[0]), audio.Rate, Show, trace == null ? null : trace.WriteLine, knownScale)
-            : Analyzer.Analyze(audio, Show, trace == null ? null : trace.WriteLine, knownScale);
+        PcmAudio audio;
+        DecodeResult result;
+        try
+        {
+            // 同じ録音を 2 回数えると、一致したことになってしまう
+            if (!seen.Add(AudioFile.Fingerprint(file)))
+            {
+                Console.WriteLine($"{Path.GetFileName(file)}: the same content as an earlier recording, so it was skipped.");
+                continue;
+            }
+            audio = AudioFile.Load(file, f => Show("Loading audio", f));
+            result = single
+                ? Decoder.Decode(Analyzer.Prepare(audio, Analyzer.Patterns[0]), audio.Rate, Show, trace == null ? null : trace.WriteLine, knownScale)
+                : Analyzer.Analyze(audio, Show, trace == null ? null : trace.WriteLine, knownScale);
+        }
+        catch (Exception e)
+        {
+            // 1 本読めなくても、ほかの録音の結果は残す
+            if (lastText.Length > 0) Console.Error.WriteLine();
+            Console.Error.WriteLine($"beepdump: {Path.GetFileName(file)}: {e.GetBaseException().Message}");
+            trouble = true;
+            continue;
+        }
         if (lastText.Length > 0) Console.Error.Write("\r" + new string(' ', lastText.Length) + "\r");
         image.Add(result.Blocks);
-        if (result.Blocks.Any(b => b.State == BlockState.Good)) knownScale = result.Scale;
+        if (result.Scale > 0 && result.Blocks.Any(b => b.State == BlockState.Good)) knownScale = result.Scale;
         int repaired = result.Blocks.Count(b => b.State == BlockState.Repaired), failed = result.Blocks.Count(b => b.State == BlockState.Failed);
         Console.WriteLine($"{Path.GetFileName(file)}: {audio.Seconds:F1} s, {result.Blocks.Count - repaired - failed} blocks read, {repaired} repaired, {failed} failed");
         foreach (string note in result.Notes) Console.WriteLine("  " + note);
         foreach (var b in result.Blocks.Where(b => b.State == BlockState.Failed)) Console.WriteLine($"  failed: {b.Address:X5}");
     }
-    foreach (int a in image.Conflicts) Console.WriteLine($"Recordings disagree at {a:X5}: record it once more to decide.");
+    // 後の録音で解決した食い違いは出さない
+    foreach (int a in image.Conflicts.Distinct().Where(a => image.StateOf(a) == BlockState.Failed)) Console.WriteLine($"Recordings disagree at {a:X5}: record it once more to decide.");
 
-    File.WriteAllBytes(output, image.Build(model));
+    bool InModel(Block b) => model.Ranges.Any(r => b.Address >= r.Start && b.Address <= r.End);
+    int outside = image.Outside(model);
+    if (outside > 0) Console.WriteLine($"{outside} blocks are outside this model's ROM and were not written." + (model == RomModel.Main256 ? " For the extension ROM of a PC-E650 or PC-U6000, use -m e650." : ""));
+    if (!image.Blocks.Any(InModel))
+    {
+        Console.Error.WriteLine($"beepdump: no blocks for this model were read, so {output} was not written.");
+        return 2;
+    }
+    // 読めなかった録音の分だけ足りない ROM で、前の ROM を置き換えない
+    if (trouble && existed)
+    {
+        Console.Error.WriteLine($"beepdump: a recording could not be read, so the existing {output} was not overwritten.");
+        return 2;
+    }
+    image.Save(output, model);
     var missing = image.Missing(model);
     Console.WriteLine($"Wrote {output} ({model.Size} bytes).");
-    if (missing.Count == 0) { Console.WriteLine("Every block was read."); return 0; }
+    var unsure = image.Unsure(model);
+    if (unsure.Count > 0)
+    {
+        Console.WriteLine("These ranges were repaired or could not be fully confirmed. Record them once more to be certain:");
+        foreach (var (start, end) in RomImage.ForRetake(unsure, model)) Console.WriteLine($"  &H{start:X5}  &H{end:X5}");
+    }
+    if (missing.Count == 0)
+    {
+        Console.WriteLine("Every block was read.");
+        return trouble ? 2 : 0;
+    }
     Console.WriteLine("Missing, filled with FFh. Record these ranges (answers to the two ? prompts):");
-    foreach (var (start, end) in missing) Console.WriteLine($"  &H{start:X5}  &H{end:X5}");
-    return 1;
+    foreach (var (start, end) in RomImage.ForRetake(missing, model)) Console.WriteLine($"  &H{start:X5}  &H{end:X5}");
+    return trouble ? 2 : 1;
 }

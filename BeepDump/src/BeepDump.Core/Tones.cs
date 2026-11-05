@@ -112,11 +112,11 @@ public sealed class PeriodReader
     /// <summary>与えた周期ごとの、倍音への合い方（倍音の位置の強さ − 倍音の間の強さ）を返す。</summary>
     public double[] Scores(Tone t, double[] periods)
     {
-        int length = Math.Min(t.End - t.Start, rate / 10);
+        int length = Math.Min(Math.Min(t.End - t.Start, rate / 10), Fft.MaxSize);
         var result = new double[periods.Length];
         if (length <= 0) return result;
         int size = 8192;
-        while (size < 16 * length) size <<= 1;
+        while (size < 16 * length && size < Fft.MaxSize) size <<= 1;
         var re = new double[size]; var im = new double[size];
         for (int i = 0; i < length; i++) re[i] = x[t.Start + i];
         Fft.Forward(re, im);
@@ -137,10 +137,10 @@ public sealed class PeriodReader
     public double Find(Tone t, double lo, double hi, double step = 0.5, double center = 0, double sigma = 0)
     {
         lo = Math.Clamp(lo, 55, 1290); hi = Math.Clamp(hi, lo + step, 1300);
-        int length = Math.Min(t.End - t.Start, rate / 10);
+        int length = Math.Min(Math.Min(t.End - t.Start, rate / 10), Fft.MaxSize);
         if (length <= 0) return lo;
         int size = 8192;
-        while (size < 16 * length) size <<= 1;
+        while (size < 16 * length && size < Fft.MaxSize) size <<= 1;
         var re = new double[size]; var im = new double[size];
         for (int i = 0; i < length; i++) re[i] = x[t.Start + i];
         Fft.Forward(re, im);
@@ -192,6 +192,9 @@ public sealed class PeriodReader
 static class Fft
 {
     const int TableSize = 1 << 18;
+
+    /// <summary>これより大きいと回転因子の表が足りない。</summary>
+    public const int MaxSize = TableSize;
     static readonly double[] Cos = new double[TableSize / 2], Sin = new double[TableSize / 2];
 
     static Fft()

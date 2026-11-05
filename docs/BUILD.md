@@ -131,9 +131,9 @@ Compress-Archive -Path app\cli\win-x64\beepdump.exe -DestinationPath beepdump-wi
 
 | 作るもの | コマンド | 必要なもの |
 |---|---|---|
-| 機械語、リスト、リストの画像、README のリスト | `py fast\build.py` | Python、Pillow（`py -m pip install pillow`）、`e500asm.exe`、`ce140conv.exe`、Windows のフォント（Consolas、メイリオ） |
+| 機械語、リスト、リストの画像、README のリスト（環境変数の設定は上のとおり） | `py fast\build.py` | Python、Pillow（`py -m pip install pillow`）、`e500asm.exe`、`ce140conv.exe`、Windows のフォント（Consolas、メイリオ） |
 | 図 | `py docs\figures\build_figures.py` | Python |
-| 図のデータ | `py docs\figures\extract_data.py` | Python、NumPy、SciPy、実機の録音（リポジトリにはありません） |
+| 図のデータ | `py docs\figures\extract_data.py 作業フォルダ ROMのフォルダ` | Python、NumPy、SciPy。実機の録音と正解の ROM、その解析の出力が要ります（リポジトリにはありません）。ふつうは `data.json` をそのまま使います |
 
 ## 困ったとき
 

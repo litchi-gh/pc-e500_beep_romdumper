@@ -26,6 +26,7 @@ sealed class MainForm : Form
     readonly Button saveButton = new() { AutoSize = true, Enabled = false };
     readonly Button clearButton = new() { AutoSize = true };
     RomImage image = new();
+    readonly HashSet<string> added = new(StringComparer.OrdinalIgnoreCase);     // 同じ録音を 2 回数えると、一致したことになってしまう
     double knownScale;
     bool running;
     bool updatingTexts;
@@ -56,7 +57,7 @@ sealed class MainForm : Form
 
         method.SelectedIndexChanged += (_, _) => { if (!updatingTexts) ShowSource(); };
         model.SelectedIndexChanged += (_, _) => { if (!updatingTexts) UpdateState(); };
-        clearButton.Click += (_, _) => { image = new(); knownScale = 0; log.Clear(); UpdateState(); };
+        clearButton.Click += (_, _) => { image = new(); added.Clear(); knownScale = 0; log.Clear(); UpdateState(); };
         addButton.Click += (_, _) => Browse();
         saveButton.Click += (_, _) => Save();
         map.Paint += (_, e) => PaintMap(e.Graphics);
@@ -158,12 +159,18 @@ sealed class MainForm : Form
     {
         if (running) { Log(T("読み取りが終わってから追加してください。", "Add it after the current reading finishes.")); return; }
         running = true;
-        addButton.Enabled = saveButton.Enabled = language.Enabled = false;
+        addButton.Enabled = saveButton.Enabled = clearButton.Enabled = language.Enabled = false;
+        try
+        {
         foreach (var path in paths)
         {
             string name = Path.GetFileName(path);
             try
             {
+                // 同じ録音を 2 回数えると、一致したことになってしまう。内容で比べるので、コピーも同じものと分かり、同じ名前の録り直しは別の録音になる
+                status.Text = T($"{name}: 確認中", $"{name}: checking");
+                string key = await Task.Run(() => AudioFile.Fingerprint(path));
+                if (added.Contains(key)) { Log(T($"{name}: 同じ内容のファイルをすでに読み込んであります。", $"{name}: a file with the same content was already added.")); continue; }
                 IProgress<(string Text, double Value)> report = new Progress<(string Text, double Value)>(p =>
                 {
                     status.Text = $"{name}: {p.Text}";
@@ -175,19 +182,27 @@ sealed class MainForm : Form
                     var audio = AudioFile.Load(path, v => report.Report((loading, v)));
                     return Analyzer.Analyze(audio, (text, v) => report.Report((text, v)), null, knownScale);
                 });
+                if (result.Blocks.Any(b => b.State != BlockState.Failed)) added.Add(key);     // 読めたものだけ覚える。読めなかったファイルはもう一度試せる
                 image.Add(result.Blocks);
-                if (result.Blocks.Any(b => b.State == BlockState.Good)) knownScale = result.Scale;
+                if (result.Scale > 0 && result.Blocks.Any(b => b.State == BlockState.Good)) knownScale = result.Scale;
                 int repaired = result.Blocks.Count(b => b.State == BlockState.Repaired), failed = result.Blocks.Count(b => b.State == BlockState.Failed), good = result.Blocks.Count - repaired - failed;
                 Log(T($"{name}: {good} ブロック読めた、修復 {repaired}、失敗 {failed}", $"{name}: {good} blocks read, {repaired} repaired, {failed} failed"));
                 foreach (var note in result.Notes) Log("  " + note);
             }
-            catch (Exception e) when (e is IOException or OutOfMemoryException or UnauthorizedAccessException) { Log(T($"{name}: 読めませんでした: {e.Message}", $"{name}: could not read it: {e.Message}")); }
+            // 並列処理の例外は包まれて届く。1 本で失敗しても、読めたブロックを失わないように続ける
+            catch (Exception e) { Log(T($"{name}: 読めませんでした: {e.GetBaseException().Message}", $"{name}: could not read it: {e.GetBaseException().Message}")); }
             UpdateState();
         }
-        running = false;
-        addButton.Enabled = language.Enabled = true;
-        bar.Value = 0;
-        UpdateState();
+        int outside = image.Outside(Model);
+        if (outside > 0) Log(T($"注意: {outside} ブロックは、選んだ機種の ROM の範囲外です。拡張 ROM を読むときは、機種を PC-E650 / PC-U6000 にしてください。", $"Note: {outside} blocks are outside the selected model's ROM. To read an extension ROM, choose PC-E650 / PC-U6000."));
+        }
+        finally
+        {
+            running = false;
+            addButton.Enabled = clearButton.Enabled = language.Enabled = true;
+            bar.Value = 0;
+            UpdateState();
+        }
     }
 
     void Log(string text) => log.AppendText(text + Environment.NewLine);
@@ -196,19 +211,23 @@ sealed class MainForm : Form
     void UpdateState()
     {
         var missing = image.Missing(Model);
-        answers.Text = missing.Count == 0
-            ? T("すべて読めました。", "Every block was read.")
-            : string.Join(Environment.NewLine, missing.Select(m => $"&H{m.Start:X5}   &H{m.End:X5}"));
-        saveButton.Enabled = !running && image.Blocks.Any();
+        var unsure = image.Unsure(Model);
+        answers.Text = missing.Count > 0
+            ? string.Join(Environment.NewLine, RomImage.ForRetake(missing, Model).Select(m => $"&H{m.Start:X5}   &H{m.End:X5}"))
+            : unsure.Count == 0
+                ? T("すべて読めました。", "Every block was read.")
+                : T("すべて読めました。黄色のマスを確かめるなら、次の範囲をもう 1 回録音します:", "Every block was read. To confirm the yellow cells, record these ranges once more:") + Environment.NewLine + string.Join(Environment.NewLine, RomImage.ForRetake(unsure, Model).Select(m => $"&H{m.Start:X5}   &H{m.End:X5}"));
+        saveButton.Enabled = !running && image.Blocks.Any(b => Model.Ranges.Any(r => b.Address >= r.Start && b.Address <= r.End));
         if (!running)
         {
             int have = Model.Ranges.Sum(r => image.Blocks.Count(b => b.Address >= r.Start && b.Address <= r.End));
             int total = Model.Size / Decoder.DataBytes;
+            int yellow = Model.Ranges.Sum(r => image.Blocks.Count(b => b.State == BlockState.Repaired && b.Address >= r.Start && b.Address <= r.End));
             status.Text = !image.Blocks.Any()
                 ? T("録音ファイル（MOV / MP4 / M4A / WAV）をここへドロップしてください。何本でも追加でき、読めなかった所を補い合います。",
                     "Drop recordings (MOV / MP4 / M4A / WAV) here. You can add several; they fill each other's gaps.")
                 : missing.Count == 0
-                    ? T($"完了: 全 {total} ブロックを読みました。「ROM を保存」で保存できます。", $"Done: all {total} blocks were read. Use Save ROM to save it.")
+                    ? T($"完了: 全 {total} ブロックを読みました（黄 {yellow}）。「ROM を保存」で保存できます。", $"Done: all {total} blocks were read ({yellow} yellow). Use Save ROM to save it.")
                     : T($"{have} / {total} ブロックを読みました。残りを録音してドロップすると、そこだけ埋まります（番地は上の 2 に出ています）。",
                         $"{have} of {total} blocks were read. Record the rest and drop it to fill the gaps (addresses are in step 2).");
         }
@@ -224,8 +243,16 @@ sealed class MainForm : Form
         if (image.Missing(Model).Count > 0 && MessageBox.Show(this, T("まだ読めていない範囲があります。その部分を FFh で埋めて保存しますか？", "Some ranges are not read yet. Save with FFh in those ranges?"), Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         using var dialog = new SaveFileDialog { Filter = T("ROM|*.rom|すべて|*.*", "ROM|*.rom|All files|*.*"), FileName = Model == RomModel.Main384 ? "PC-E650.rom" : "PC-E500.rom" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        File.WriteAllBytes(dialog.FileName, image.Build(Model));
-        Log(T($"保存しました: {dialog.FileName}", $"Saved: {dialog.FileName}"));
+        try
+        {
+            image.Save(dialog.FileName, Model);
+            Log(T($"保存しました: {dialog.FileName}", $"Saved: {dialog.FileName}"));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // 集めたブロックを失わないように、エラーを出して続ける
+            MessageBox.Show(this, T($"保存できませんでした: {e.Message}", $"Could not save: {e.Message}"), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     /// <summary>ブロックを 1 つずつマス目で描く。マス目は欄に収まる最大の大きさにする。</summary>

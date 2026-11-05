@@ -13,7 +13,7 @@ ROMDump copies the built-in ROM of a Sharp PC-E500 series pocket computer to a P
 - **Very little has been tested on real hardware.** The machine-code version was run on one PC-E500 and one PC-U6000, reading one recording of each range. The results matched the ROM images at hand byte for byte (384KB on the PC-U6000). The BASIC version has only been run part of the way, on a PC-E500. Other models, such as the PC-E650, have not been run on real hardware.
 - **The only recording device tested is iPhone video.** Other devices have only been tried by processing a recording. The reading was also tuned on these few recordings.
 - **Data that reads successfully is not guaranteed to be correct.** Only the check values can confirm it. With nothing to compare against, a remaining error would go unnoticed. During development, wrong data did pass the check on the BASIC version. That was addressed, but it cannot be said to be gone. For certainty, use the machine-code version, and record twice to confirm the two agree.
-- **Back up anything important first.** If a typing mistake slips through, the machine-code version can crash the machine and need a reset. It plays for a long time, so use fresh batteries or an AC adapter.
+- **Back up anything important first.** If a typing mistake slips through, the machine-code version can crash the machine and need a reset. It plays for a long time, so use fresh batteries.
 - **Some environments have not been run.** The macOS version, the Linux Arm64 version, and reading through the real ffmpeg are untested (see the [installation guide](docs/INSTALL_en.md)).
 
 If something does not work, or you confirm something new, please tell us in [Issues](https://github.com/litchi-gh/pc-e500_beep_romdumper/issues).
@@ -41,7 +41,7 @@ If something does not work, or you confirm something new, please tell us in [Iss
 
 | | Machine code (recommended) | BASIC |
 |---|---|---|
-| Typing | 18 lines, about 790 characters | 2 lines, about 170 characters |
+| Typing | 21 lines, about 900 characters | 2 lines, about 190 characters |
 | Time for the 256KB main ROM | **15.3 minutes** (measured) | About 1.9 hours (estimated from a partial run) |
 | Read from one recording (real hardware) | **Everything** (PC-E500, PC-U6000) | About 96% (record the rest again) |
 | If you mistype | Usually `NG` on `RUN`. A mistake that slips through can crash the machine and need a reset | Stops with an error, or plays unreadable sound |
@@ -76,7 +76,7 @@ See the [installation guide](docs/INSTALL_en.md) for how to get the application,
 
 ### Pocket computer
 
-See [Supported models](#supported-models). No peripherals are needed. It plays for a long time, so use fresh batteries or an AC adapter.
+See [Supported models](#supported-models). No peripherals are needed. It plays for a long time, so use fresh batteries.
 
 ### Recording device
 
@@ -102,22 +102,25 @@ There are also images of the listings wrapped to the machine's 40-column screen,
 
 <!-- list:BEEPFAST.TXT skip=1 -->
 
-<pre style="font-size:1.25em; white-space:pre-wrap"><code>10 INPUT A,E:E=E+1:P=&amp;HBFA00:POKE &amp;HBFBE0,0,A/256 AND 255,A/65536,0,E/256 AND 255,E/65536 AND 15,130,0
+<pre style="font-size:1.25em; white-space:pre-wrap"><code>5 IF PEEK &amp;HBFD1B&gt;&amp;HFA THEN PRINT "POKE LINE FIRST":END
+10 INPUT A,E:IF A&gt;E GOTO 45
+15 E=E+256:P=&amp;HBFA00:POKE &amp;HBFBE0,0,A/256 AND 255,A/65536,0,E/256 AND 255,E/65536 AND 15,130,0
 20 READ D$,C:IF D$="" GOTO 50
-30 S=0:FOR I=1 TO LEN D$ STEP 2:V=VAL ("&amp;H"+MID$ (D$,I,2)):POKE P,V:P=P+1:S=S+V:NEXT
+30 S=0:FOR I=1 TO LEN D$ STEP 2:V=VAL ("&amp;H"+MID$ (D$,I,2)):POKE P,V:P=P+1:S=S+V*I:NEXT
 40 IF S=C GOTO 20
 45 PRINT "NG ";D$:END
-50 CALL &amp;HBFA00
-100 DATA "2FB637D9E8FB0B000C00FA0BCC018008",1609
-110 DATA "5A0464FA0456FA8CE0FB0B3065FF081A",1848
-120 DATA "2708A50464FAFD544D66CC01000456FA",1627
-130 DATA "B637B537CC010690270477FA7D011B09",1402
-140 DATA "8DE3FB0B4D541B2D3071FD8FD100E8FB",2112
-150 DATA "0B96273F9F079024455045650477FA7D",1426
-160 DATA "011B0D063071FD8F750B401FEF08009F",1233
-170 DATA "0477FA0477FA74CC00083069FD100490",1644
-180 DATA "FAF41E043069FD100490FA7D001B1506",1527
-190 DATA "8BE6FB0BEF06",876
+50 IF P&lt;&gt;&amp;HBFA96 GOTO 45
+55 CALL &amp;HBFA00
+100 DATA "2FB637D9E8FB0B000C00FA0BCC018008",22173
+110 DATA "5A0464FA0456FA8CE0FB0B3065FF081A",29044
+120 DATA "2708A50464FAFD544D66CC01000456FA",27021
+130 DATA "B637B537CC010690270477FA7D011B09",18924
+140 DATA "8DE3FB0B4D541B2D3071FD8FD100E8FB",36096
+150 DATA "0B96273F9F079024455045650477FA7D",25920
+160 DATA "011B0D063071FD8F750B401FEF08009F",22673
+170 DATA "0477FA0477FA74CC00083069FD100490",24940
+180 DATA "FAF41E043069FD100490FA7D001B1506",18729
+190 DATA "8BE6FB0BEF06",4378
 200 DATA "",0</code></pre>
 
 <!-- /list -->
@@ -134,8 +137,8 @@ Enter BASIC, switch to PRO mode, type in this listing, and return to RUN mode. W
 
 <!-- list:BEEPDUMP.TXT skip=0 -->
 
-<pre style="font-size:1.25em; white-space:pre-wrap"><code>10 INPUT A,E:FOR I=1 TO 99:NEXT
-20 S=A/256 AND 255:BEEP 1,A/5000,8:FOR A=A TO A+255:BEEP 1,PEEK A,8:S=S+PEEK A:NEXT:BEEP 1,S-32768 AND 255,8:BEEP 1,S/257,8:IF A&lt;E GOTO 20</code></pre>
+<pre style="font-size:1.25em; white-space:pre-wrap"><code>10 INPUT A,E:A=INT (A/256)*256:FOR I=1 TO 99:NEXT
+20 S=A/256 AND 255:BEEP 1,A/5000,8:FOR A=A TO A+255:BEEP 1,PEEK A,8:S=S+PEEK A:NEXT:BEEP 1,S-32768 AND 255,8:BEEP 1,S/257,8:IF A&lt;=E GOTO 20</code></pre>
 
 <!-- /list -->
 
@@ -173,7 +176,7 @@ For a first try, a short range such as `&HC0000` and `&HC0FFF` is a good idea (a
    | Color | Meaning |
    |---|---|
    | Green | Read |
-   | Yellow | Read after correcting a small misreading (it passes the check) |
+   | Yellow | Read after correcting a small misreading, or the address could not be confirmed (it passes the check) |
    | Red | Not read, or recordings disagree about its content |
    | Gray | Not recorded yet |
 
@@ -181,7 +184,7 @@ For a first try, a short range such as `&HC0000` and `&HC0FFF` is a good idea (a
 
    This is the window after reading a real recording of the PC-U6000 main ROM. The extension ROM has not been recorded yet, so it is gray, and its addresses appear in step 2.
 
-   **Yellow cells are fine as they are.** They do not need recording again. See [ANALYSIS_en.md](docs/ANALYSIS_en.md#58-repairing-bits) for how repair works.
+   Yellow cells pass the check, but are less certain than green. For certainty, record the ranges shown in step 2 once more. If the content is the same, they turn green (adding the same recording again, as a copy, or converted, does not confirm anything). See [ANALYSIS_en.md](docs/ANALYSIS_en.md#58-repairing-bits) for how repair works.
 
 4. When everything is there, press Save ROM.
 
@@ -193,10 +196,10 @@ On a PC-E650 or PC-U6000, record the main and extension ROMs separately and drop
 
 If any cell is red or gray, step 2 in the window lists the addresses still missing.
 
-![Recording what was red the first time gives everything when the two are combined. Yellow cells are already read and need no retake](docs/figures/retake_en.svg)
+![Recording what was red the first time gives everything when the two are combined](docs/figures/retake_en.svg)
 
-1. Without closing the application, answer the `?` prompts with those addresses and record.
-2. Drop the recording. Only the missing blocks are filled in.
+1. Without closing the application, answer the `?` prompts with those addresses and record. The BASIC version may not read a short recording, so the range shown starts a little before what is missing and covers at least 8 blocks (2 KB). If you choose a range yourself, do the same.
+2. Drop the recording. The missing blocks are filled in. If a neighboring block is read again and its content differs, it goes back to red (one more recording decides it).
 
 You can also record everything again. If the noises fall in different places, two recordings make up for each other. If you closed the application, drop the earlier recording again too and you get the same result.
 
@@ -208,10 +211,10 @@ If you save with blocks missing, those blocks are filled with `FFh` (you are ask
 
 | Symptom | What to check |
 |---|---|
-| Stops with `NG` (machine code) | The DATA on the line shown has a typing mistake. Fix it and `RUN` again |
-| The machine-code sound ends after 0.5 seconds and returns to `>` | This is an old `BEEPFAST`. Load the current `BASIC/BEEPFAST.BAS` again |
-| I/O error on `LOAD` (`Sharp_ce140f_emul`) | This is an old `BEEPFAST.BAS`. Copy the current one to the SD card again |
-| `Illegal function call in 10` after answering `?` | The address has too many digits. `&HFFFFF` has five Fs |
+| Stops with `NG` and some DATA (machine code) | The DATA on the line shown has a typing mistake. Fix it and `RUN` again |
+| Stops with only `NG` (machine code) | The addresses are reversed, or a DATA line is missing. Check the addresses and `LIST` |
+| `POKE LINE FIRST` appears (machine code) | The memory for the machine code is not reserved. Run the `POKE` line, go back with BASIC on the menu, and `RUN`. The program you typed is kept |
+| `Illegal function call in 15` (machine code) or `Data out of range in 20` (BASIC) after answering `?` | The address has too many digits. `&HFFFFF` has five Fs |
 | `Data out of range` or a similar error after answering `?` | The program has a typing mistake. Compare it with `LIST` |
 | The application says no tones were found, or could not read the recording | The recording is too quiet or has loud noise. Move the phone closer and record again |
 | Many red cells (the BASIC version leaves a few per recording) | Record the missing part again and add it. Avoid noises and talking |
@@ -228,7 +231,8 @@ beepdump --help
 ```
 
 - `-m e500` (the default) is the 256KB main ROM. `-m e650` is the 384KB of extension and main ROM.
-- Give it any number of recordings, and they fill each other's gaps. Missing ranges are listed by address.
+- Give it any number of recordings, and they fill each other's gaps. Missing ranges are listed by address. To add a retake, give the earlier recordings too.
+- An existing ROM file is not overwritten unless you add `--force`. If a recording could not be read, it is not overwritten even with `--force`.
 - The exit code is 0 if everything was read, 1 if some is missing (the ROM is still written, with `FFh` there), and 2 on an error.
 - WAV can be read on any OS. MOV and other formats work directly on Windows, and need [ffmpeg](docs/INSTALL_en.md#ffmpeg) on Linux and Mac.
 
@@ -239,6 +243,7 @@ It has been run on Windows and on Linux (Ubuntu on WSL, x64). **The Mac version 
 - [docs/INSTALL_en.md](docs/INSTALL_en.md) — installation, including ffmpeg
 - [docs/BUILD_en.md](docs/BUILD_en.md) — building (the .NET SDK, making a release)
 - [docs/ANALYSIS_en.md](docs/ANALYSIS_en.md) — the details of the analysis, from recording to ROM
+- [docs/CHANGELOG_en.md](docs/CHANGELOG_en.md) — the change history
 - [docs/TECHNICAL_en.md](docs/TECHNICAL_en.md) — the sound format, changing the speed, what has been verified, building, and the file layout
 
 ## License

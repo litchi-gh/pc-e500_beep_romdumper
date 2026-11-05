@@ -15,15 +15,32 @@ public static class FastDecoder
     const byte LearnSync = 0x5A, BlockSync = 0xA5;
     const int RefitBlocks = 16, RefitRounds = 3, HeadChoices = 5, SampleBlocks = 32, NearbyBlocks = 4;
     const double ZeroBlockResidual = 0.5;
+    const double JoinedBurst = 0.8;      // 秒。学習用の並びとブロック 1 つを合わせた長さの目安より短い
+    const double LearnSeconds = 0.44;    // 秒。規定の速さ（待ち 130）での学習用の並びの長さ
+    const int StrayDistance = 0x1000;    // S2 が見ていない番地のビットの最小の違い
     const double QuietBurst = 0.25;      // 典型的な塊に対する音量の比
+    const int LearnRetries = 4;
     const int RepairBits = 48, RepairPairs = 10;   // 自信のないビットを 1 つずつ、上位どうしは 2 つ組で試す
 
-    public static bool LooksFast(float[] x, int rate, double relative = 0.12) => LongBursts(x, rate, relative).Count >= 2;
+    public static bool LooksFast(float[] x, int rate, double relative = 0.12)
+    {
+        var tones = Segmenter.Find(x, rate, BurstGap, relative: relative);
+        var bursts = LongBursts(x, rate, tones);
+        if (bursts.Count == 0) return false;
+        // BASIC 版は短い音が大半で、長い塊があれば物音。機械語版は長い塊が大半
+        var shorter = tones.Where(t => t.End - t.Start <= LongBurst * rate).ToArray();
+        long shortTime = shorter.Sum(t => (long)(t.End - t.Start)), longTime = bursts.Sum(t => (long)(t.End - t.Start));
+        if (longTime <= shortTime) return false;
+        // 短い録り直しに長い物音が入ると時間では負ける。音の数がブロックの半分以上あれば BASIC 版
+        if (shorter.Length >= Decoder.FrameTones / 2 && longTime < shortTime * 10) return false;
+        // 響きの長い機種の短い録り直しでは、学習用の並びとブロックが 1 つの塊になる
+        return bursts.Count >= 2 || (bursts[0].End - bursts[0].Start) / (double)rate > JoinedBurst;
+    }
 
     /// <summary>長い音の塊。録音の前後の部屋の雑音も長い音に見えるので、本来の音より極端に小さいものは除く。</summary>
-    static List<Tone> LongBursts(float[] x, int rate, double relative)
+    static List<Tone> LongBursts(float[] x, int rate, List<Tone> tones)
     {
-        var bursts = Segmenter.Find(x, rate, BurstGap, relative: relative).Where(b => (b.End - b.Start) / (double)rate > LongBurst).ToList();
+        var bursts = tones.Where(b => (b.End - b.Start) / (double)rate > LongBurst).ToList();
         if (bursts.Count == 0) return bursts;
         var levels = bursts.Select(b =>
         {
@@ -39,7 +56,7 @@ public static class FastDecoder
     public static DecodeResult Decode(float[] x, int rate, Action<string, double>? progress = null, double relative = 0.12, int lookahead = 3, Func<int, bool>? wanted = null)
     {
         var notes = new List<string>();
-        var bursts = LongBursts(x, rate, relative);
+        var bursts = LongBursts(x, rate, Segmenter.Find(x, rate, BurstGap, relative: relative));
         var blocks = new List<Block>();
         double speed = 0;
         Run? previous = null;
@@ -50,7 +67,7 @@ public static class FastDecoder
             int count = i - from;
             var run = new Run(x, rate, lookahead, wanted, bursts.GetRange(from, count), notes, f => progress?.Invoke(Messages.Pick("音を読み取り中", "Reading tones"), (done + f * count) / bursts.Count));
             blocks.AddRange(run.Decode(previous));
-            if (run.Speed > 0) { speed = run.Speed; previous = run; }
+            if (run.Speed > 0 && run.ReadAny) { speed = run.Speed; previous = run; }
             done += count;
             from = i;
         }
@@ -68,7 +85,10 @@ public static class FastDecoder
         public double Longest => 8 * (T + E) + G * 48 / 36;
 
         /// <summary>index 番目のバイトのあとの切れ目で余分にかかる時間。</summary>
-        public double After(int index) => G / 36 * index switch
+        public double After(int index) => G * Ratio(index);
+
+        /// <summary>index 番目のバイトのあとの切れ目の、G に対する比。</summary>
+        public static double Ratio(int index) => (index switch
         {
             0 => 12,
             1 => 7,
@@ -76,7 +96,7 @@ public static class FastDecoder
             < HeadBytes + Decoder.DataBytes - 1 => 36,
             HeadBytes + Decoder.DataBytes - 1 => 42,
             _ => 22,
-        };
+        }) / 36.0;
     }
 
     readonly record struct Edge(double Time, bool Up);
@@ -121,6 +141,9 @@ public static class FastDecoder
         (Tone Burst, byte[] Bytes, double Start) learned = (default, [], 0);
 
         public double Speed { get; private set; }
+
+        /// <summary>検査の通るブロックがあったか。なければ学習結果を信用できない。</summary>
+        public bool ReadAny { get; private set; }
 
         /// <summary>バイト列の切り替えを順に作る。戻り値は次のバイトの開始時刻。</summary>
         static double Walk(IEnumerable<byte> bytes, double start, Timing t, ref bool level, Action<Edge>? edge)
@@ -172,7 +195,11 @@ public static class FastDecoder
                 (timing, response, length, learned) = (previous.timing, previous.response, previous.length, previous.learned);
                 continued = AddressOf(ReadWithShifts(bursts[0], out _)) >= 0;
             }
-            if (!continued) bursts = SplitLearn(bursts);
+            if (!continued)
+            {
+                length = (int)(ResponseLength * rate);   // 前の実行で長い応答に伸ばしていても、学習は短い応答からやり直す
+                bursts = SplitLearn(bursts);
+            }
             if (!continued && (bursts.Count < 2 || !Learn(bursts[0])))
             {
                 notes.Add(Messages.Pick("学習用の並びが読めませんでした。", "Could not read the learning sequence."));
@@ -198,10 +225,17 @@ public static class FastDecoder
             {
                 int sample = Math.Max(1, blocks.Length / SampleBlocks);
                 Parallel.For(0, blocks.Length, i => { if (i % sample == 0) Read(i); });
-                int known = Array.FindIndex(addresses, a => a >= 0);
-                if (known >= 0)
+                // 物音で塊が割れると番号がずれるので、いちばん近い読めたブロックから番地を求める
+                RejectStrayAddresses(addresses);
+                int[] known = Enumerable.Range(0, blocks.Length).Where(i => addresses[i] >= 0).ToArray();
+                if (known.Length > 0)
                     for (int i = 0; i < blocks.Length; i++)
-                        skip[i] = addresses[i] < 0 && !wanted((addresses[known] + (i - known) * Decoder.DataBytes) & 0xFFFFF);
+                    {
+                        int near = known.MinBy(n => Math.Abs(n - i));
+                        int address = (addresses[near] + (i - near) * Decoder.DataBytes) & 0xFFFFF;
+                        // 塊が割れると番号が 1 つずれることがあるので、前後の番地も見る
+                        skip[i] = addresses[i] < 0 && !wanted(address) && !wanted((address + Decoder.DataBytes) & 0xFFFFF) && !wanted((address - Decoder.DataBytes) & 0xFFFFF);
+                    }
             }
             int finished = 0;
             Parallel.For(0, blocks.Length, i =>
@@ -210,6 +244,33 @@ public static class FastDecoder
                 int n = Interlocked.Increment(ref finished);
                 if (n % 4 == 0) progress(0.2 + 0.7 * n / blocks.Length);
             });
+
+            // 学習用の並びでない塊から学ぶと、切り方も読み方も狂って 1 つも読めない。学び直して全部切り直す
+            void Restart(IEnumerable<Tone> tones)
+            {
+                Speed = rate / (timing.T + timing.E / 2 + timing.G / 8);
+                blocks = Split(tones).ToArray();
+                read = new byte[blocks.Length][];
+                starts = new double[blocks.Length];
+                addresses = new int[blocks.Length];
+                skip = new bool[blocks.Length];
+                Parallel.For(0, blocks.Length, Read);
+            }
+            if (!continued && addresses.All(a => a < 0))
+            {
+                if (previous != null)
+                {
+                    // 前の実行の学習結果で読む。先頭の塊もデータのブロックかもしれない
+                    (timing, response, length, learned) = (previous.timing, previous.response, previous.length, previous.learned);
+                    Restart(bursts);
+                }
+                else
+                {
+                    // 学習用の並びの前の物音から学んだのかもしれない。次の塊から学び直す
+                    for (int k = 1; k <= LearnRetries && k + 1 < bursts.Count && addresses.All(a => a < 0); k++)
+                        if (Learn(bursts[k])) Restart(bursts.Skip(k + 1));
+                }
+            }
 
             // 読めたブロックでブザーの応答とビットの時間を覚え直し、読めなかったブロックを読み直す。読めるものが増える間くり返す
             for (int round = 0; round < RefitRounds; round++)
@@ -247,10 +308,14 @@ public static class FastDecoder
                 Parallel.ForEach(failed, i => repaired[i] = Repair(blocks[i], expected[i])!);
             progress(1);
 
+            ReadAny = addresses.Any(a => a >= 0);
+            // 比べる相手がいないと、番地の上位の読み違いを見つけられない。読めたブロックが 1 つだけなら緑にしない
+            bool alone = addresses.Count(a => a >= 0) == 1;
+            if (alone) notes.Add(Messages.Pick("読めたブロックが 1 つだけなので、番地を確かめられません。前後を含めて録音すると確かです。", "Only one block was read, so its address cannot be confirmed. Recording its neighbors too makes it certain."));
             var result = new List<Block>();
             for (int i = 0; i < blocks.Length; i++)
             {
-                if (addresses[i] >= 0) result.Add(new(addresses[i], BlockState.Good, read[i][HeadBytes..(HeadBytes + Decoder.DataBytes)]));
+                if (addresses[i] >= 0) result.Add(new(addresses[i], alone ? BlockState.Repaired : BlockState.Good, read[i][HeadBytes..(HeadBytes + Decoder.DataBytes)]));
                 else if (skip[i]) continue;
                 else if (repaired[i] != null) result.Add(new(expected[i], BlockState.Repaired, repaired[i][HeadBytes..(HeadBytes + Decoder.DataBytes)]));
                 else if (expected[i] >= 0) result.Add(new(expected[i], BlockState.Failed, []));
@@ -273,7 +338,9 @@ public static class FastDecoder
                 {
                     if (h == g) continue;
                     int j = good[h];
-                    if (keep[j] == ((keep[i] + (j - i) * Decoder.DataBytes) & 0xFFFFF)) agree++;
+                    // 塊の割れや欠けで番号はずれることがあるので、ぴったりとは比べない。S1 の読み違いなら StrayDistance 以上離れる
+                    int gap = (keep[j] - keep[i] - (j - i) * Decoder.DataBytes) & 0xFFFFF;
+                    if (Math.Min(gap, 0x100000 - gap) < StrayDistance) agree++;
                     else differ++;
                 }
                 if (differ > agree) addresses[i] = -1;
@@ -334,9 +401,10 @@ public static class FastDecoder
         /// <summary>学習用の並びと最初のブロックが 1 つの塊に見えていれば切る。ブロックの長さから学習用の並びの長さが分かる。</summary>
         List<Tone> SplitLearn(List<Tone> tones)
         {
-            if (tones.Count < 2) return tones;
+            if (tones.Count == 0) return tones;
+            // ほかに塊がなければブロックの長さが分からないので、規定の速さの長さを使う
             var lengths = tones.Skip(1).Select(t => t.End - t.Start).OrderBy(n => n).ToArray();
-            double expected = (double)lengths[lengths.Length / 4] * LearnBytes().Length / BlockBytes;
+            double expected = lengths.Length > 0 ? (double)lengths[lengths.Length / 4] * LearnBytes().Length / BlockBytes : LearnSeconds * rate;
             var first = tones[0];
             if (first.End - first.Start < expected * 1.25) return tones;
             int cut = Quietest(first.Start + (int)(expected * 0.93), Math.Min(first.End, first.Start + (int)(expected * 1.1)));
@@ -448,16 +516,6 @@ public static class FastDecoder
             return (best + (d < 0 ? 0.5 * (score[best - 1] - score[best + 1]) / d : 0)) / 2;
         }
 
-        double Residual(Tone burst, IEnumerable<byte> bytes, double start, Timing t, Response r)
-        {
-            int origin = burst.Start - length;
-            var y = new double[burst.End - burst.Start + 2 * length];
-            foreach (var edge in EdgesOf(bytes, start - origin, t)) r.Add(y, edge.Time, edge.Up, 1);
-            double sum = 0;
-            for (int i = 0; i < y.Length; i++) { int n = origin + i; double d = (n >= 0 && n < x.Length ? x[n] : 0) - y[i]; sum += d * d; }
-            return sum;
-        }
-
         /// <summary>
         /// 切り替えの時刻はパラメータ（開始, T, M, G, E）の一次式なので、音の残りを波形の傾きで説明するように同時に解く（ガウス・ニュートン法）。
         /// </summary>
@@ -496,7 +554,7 @@ public static class FastDecoder
                     c[1] += 1; c[4] += bit;
                 }
                 cell += t.After(b);
-                c[3] += t.After(b) / Math.Max(1e-9, t.G);
+                c[3] += Timing.Ratio(b);
             }
             var residual = new double[size];
             for (int i = 0; i < size; i++) { int n = origin + i; residual[i] = (n >= 0 && n < x.Length ? x[n] : 0) - model[i]; }
@@ -525,7 +583,7 @@ public static class FastDecoder
                     largest = Math.Max(largest, Math.Abs(shift) + bit * Math.Abs(delta[2]));
                     shift += delta[1] + bit * delta[4];
                 }
-                shift += t.After(b) / Math.Max(1e-9, t.G) * delta[3];
+                shift += Timing.Ratio(b) * delta[3];
             }
             double scale = largest > 1 ? 1 / largest : 1;
             return (new Timing(t.T + scale * delta[1], t.M + scale * delta[2], t.G + scale * delta[3], t.E + scale * delta[4]), start + scale * delta[0]);

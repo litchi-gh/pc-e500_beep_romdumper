@@ -32,14 +32,17 @@ public static class WavReader
             if (id == "data")
             {
                 if (channels < 1 || rate < 1) return null;
-                return ReadSamples(stream, format, channels, rate, bits);
+                // パイプからの WAV はサイズが分からない（0 や最大値）。それ以外は data の範囲で止める。後ろにほかのチャンクが続くことがある
+                // 4 GB を超えるファイルは、サイズの欄が桁あふれしている
+                bool huge = stream.CanSeek && stream.Length - stream.Position > uint.MaxValue;
+                return ReadSamples(stream, format, channels, rate, bits, huge || size is 0 or >= 0xFFFFFFF0 ? long.MaxValue : size);
             }
             Skip(stream, size + (size & 1));
         }
         return null;
     }
 
-    static PcmAudio? ReadSamples(Stream stream, int format, int channels, int rate, int bits)
+    static PcmAudio? ReadSamples(Stream stream, int format, int channels, int rate, int bits, long remaining)
     {
         if (!(format == FormatPcm && bits is 8 or 16 or 24 or 32) && !(format == FormatFloat && bits == 32)) return null;
         int width = bits / 8, frameSize = width * channels;
@@ -47,8 +50,9 @@ public static class WavReader
         for (int c = 0; c < channels; c++) data[c] = new short[1 << 20];
         var buffer = new byte[frameSize * 65536];
         int count = 0, held = 0, got;
-        while ((got = stream.Read(buffer, held, buffer.Length - held)) > 0)
+        while (remaining > 0 && (got = stream.Read(buffer, held, (int)Math.Min(buffer.Length - held, remaining))) > 0)
         {
+            remaining -= got;
             int total = held + got, frames = total / frameSize;
             if ((long)count + frames > data[0].Length)
             {

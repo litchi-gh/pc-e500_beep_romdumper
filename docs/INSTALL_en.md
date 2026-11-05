@@ -139,9 +139,9 @@ Do not change the level or lower the sample rate in the conversion.
 Check the command-line version in this order:
 
 ```sh
-beepdump --version          # prints something like beepdump 0.1.0
+beepdump --version          # prints something like beepdump 0.2.0
 beepdump listing --basic    # prints the listing to type in
-beepdump decode -o test.rom recording.wav
+beepdump decode -o test.rom recording.wav    # needs --force if test.rom exists
 ```
 
 The exit code of `decode` is 0 if everything was read, 1 if some is missing, and 2 on an error. A recording of part of the range lists the missing ranges and gives 1.

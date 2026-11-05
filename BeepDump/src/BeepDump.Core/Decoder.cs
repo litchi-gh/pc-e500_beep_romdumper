@@ -28,11 +28,13 @@ public static class Decoder
     const double ReliablePeriod = 250;     // これより長い周期（値 40 以上）は倍音が多く読み違えにくい
     const double KnownScaleWindow = 0.002;
     const double DurationWindow = 0.8;     // ms。音の長さから周期の候補を絞る幅
+    const int ReliableRate = 32000;        // これより低いサンプリング周波数では、和の変わらない読み違いが検査を通った
 
     /// <param name="knownScale">同じ機械の前の録音で分かった周期の倍率（なければ 0）。音の種類が少ない短い録り直しでも倍率を間違えない</param>
-    public static DecodeResult Decode(float[] x, int rate, Action<string, double>? progress = null, Action<string>? trace = null, double knownScale = 0, double relative = 0.12, int lookahead = 3, Func<int, bool>? wanted = null)
+    /// <param name="fast">機械語版か（分かっていれば）。指定がなければ音から判別する</param>
+    public static DecodeResult Decode(float[] x, int rate, Action<string, double>? progress = null, Action<string>? trace = null, double knownScale = 0, double relative = 0.12, int lookahead = 3, Func<int, bool>? wanted = null, bool? fast = null)
     {
-        if (FastDecoder.LooksFast(x, rate, relative)) return FastDecoder.Decode(x, rate, progress, relative, lookahead, wanted);
+        if (fast ?? FastDecoder.LooksFast(x, rate, relative)) return FastDecoder.Decode(x, rate, progress, relative, lookahead, wanted);
         var notes = new List<string>();
         var tones = Segmenter.Find(x, rate, shortest: 0.0024, relative: relative);
         var blocks = new List<Block>();
@@ -45,13 +47,21 @@ public static class Decoder
             if (count >= FrameTones / 2)
             {
                 var run = new Run(x, rate, tones.GetRange(from, count), notes, f => progress?.Invoke(Messages.Pick("音を読み取り中", "Reading tones"), (done + f * count) / tones.Count), trace, knownScale);
-                blocks.AddRange(run.Decode());
-                if (run.Scale > 0) { scale = run.Scale; overhead = run.Overhead; }
+                var found = run.Decode().ToList();
+                blocks.AddRange(found);
+                if (run.Scale > 0 && found.Any(b => b.State == BlockState.Good)) { scale = run.Scale; overhead = run.Overhead; }
             }
             done += count;
             from = i;
         }
-        if (blocks.Count == 0) notes.Add(tones.Count == 0 ? Messages.Pick("音が見つかりませんでした。", "No tones were found.") : Messages.Pick("BEEPDUMP の音の並びが見つかりませんでした。", "The BEEPDUMP tone sequence was not found."));
+        if (blocks.Count == 0) notes.Add(tones.Count == 0 ? Messages.Pick("音が見つかりませんでした。", "No tones were found.")
+            : tones.Count >= FrameTones / 2 ? Messages.Pick("BASIC 版の音はありますが、読み取れませんでした。", "There are BASIC tones, but they could not be read.")
+            : Messages.Pick("BEEPDUMP の音の並びが見つかりませんでした。", "The BEEPDUMP tone sequence was not found."));
+        if (rate < ReliableRate && blocks.Any(b => b.State == BlockState.Good))
+        {
+            blocks = blocks.Select(b => b.State == BlockState.Good ? b with { State = BlockState.Repaired } : b).ToList();
+            notes.Add(Messages.Pick($"サンプリング周波数が {rate} Hz と低く、BASIC 版では誤りが通りやすいので、緑にしません。録音の設定を上げるか、もう 1 回録音して確かめてください。", $"The sample rate is only {rate} Hz, where errors pass more easily on the BASIC version, so no block turns green. Raise the recording's sample rate, or record it again to confirm."));
+        }
         return new(blocks, scale, overhead, tones.Count, notes);
     }
 
@@ -78,6 +88,7 @@ public static class Decoder
         double[] periods = [];
         double[] frameScale = [];
         int[][] frames = [];               // 各ブロックの音の番号
+        bool[] confirmed = [];             // 番地をほかのブロックが支持しているか
 
         public double Scale { get; private set; }
         public double Overhead { get; private set; }
@@ -142,6 +153,14 @@ public static class Decoder
                 if (frames[f].Length != FrameTones) { trace?.Invoke($"{address:X5} {frames[f].Length} count " + string.Join(' ', frames[f].Select(i => $"{durations[i]:F1}:{intervals[i]:F1}"))); result.Add(Failed(address)); continue; }
                 var values = readings[f];
                 trace?.Invoke($"{address:X5} {frames[f].Length} {(Passes(values, address) ? 1 : 0)} {(OnLattice(f, values) ? 1 : 0)} {frameScale[f]:F5} " + string.Join(' ', values.Select((v, k) => $"{v}:{periods[frames[f][k]]:F2}:{durations[frames[f][k]]:F1}:{intervals[frames[f][k]]:F1}")));
+                // 番地を支持する票が足りないと、音の読み違いで番地もデータもずれていても検査が通る。確かめようがないので読めなかったことにする
+                if (!confirmed[f])
+                {
+                    string note = Messages.Pick("ブロックの番地を確かめられませんでした。BASIC 版は、前後のブロックも含めて 2 ブロック以上録音してください。", "A block's address could not be confirmed. With the BASIC version, record at least 2 blocks, including its neighbors.");
+                    if (!notes.Contains(note)) notes.Add(note);
+                    result.Add(Failed(address));
+                    continue;
+                }
                 if (Passes(values, address) && Plausible(f, values)) { result.Add(new(address, BlockState.Good, ToData(values))); continue; }
                 var retried = RereadFrame(f);
                 if (Passes(retried, address) && Plausible(f, retried)) { result.Add(new(address, BlockState.Repaired, ToData(retried))); continue; }
@@ -253,16 +272,26 @@ public static class Decoder
             (int Passes, double Residual) best = (-1, 0);
             // 前の録音の倍率が分かっていれば、その近くを優先する（1 段ずれた偽の候補は 0.36% 離れている）
             var nearKnown = peaks.Where(p => knownScale > 0 && Math.Abs(Low + p * Step - knownScale) < KnownScaleWindow).ToList();
-            foreach (int peak in nearKnown.Count > 0 ? nearKnown : peaks)
+            void Try(IEnumerable<int> candidates)
             {
-                double s = Low + peak * Step;
-                var self = check.Select(f => SelfAddress(ReadFrame(f, s))).ToArray();
-                int passes = self.Count(a => a >= 0) + Enumerable.Range(1, Math.Max(0, self.Length - 1)).Count(n => self[n] >= 0 && self[n] == self[n - 1] + DataBytes);
-                if (passes < best.Passes) continue;
-                double residual = ClassResidual(check, s);
-                if (passes > best.Passes || residual < best.Residual) { best = (passes, residual); Scale = s; }
+                foreach (int peak in candidates)
+                {
+                    double s = Low + peak * Step;
+                    var self = check.Select(f => SelfAddress(ReadFrame(f, s))).ToArray();
+                    int passes = self.Count(a => a >= 0) + Enumerable.Range(1, Math.Max(0, self.Length - 1)).Count(n => self[n] >= 0 && self[n] == self[n - 1] + DataBytes);
+                    if (passes < best.Passes) continue;
+                    double residual = ClassResidual(check, s);
+                    if (passes > best.Passes || residual < best.Residual) { best = (passes, residual); Scale = s; }
+                }
             }
-            if (best.Passes == 0) { Scale = Low + peaks[0] * Step; notes.Add(Messages.Pick("検査の通るブロックが少なく、音の高さの倍率が不確かです。", "Few blocks passed the check, so the pitch scale is uncertain.")); }
+            Try(nearKnown.Count > 0 ? nearKnown : peaks);
+            double nearest = Scale;
+            if (best.Passes == 0 && nearKnown.Count > 0) Try(peaks);     // 別の機械か、倍率が大きく変わった録音かもしれない
+            if (best.Passes == 0)
+            {
+                Scale = nearKnown.Count > 0 ? nearest : Low + peaks[0] * Step;     // 通らなければ、前の録音に近い候補を残す
+                notes.Add(Messages.Pick("検査の通るブロックが少なく、音の高さの倍率が不確かです。", "Few blocks passed the check, so the pitch scale is uncertain."));
+            }
             frameScale = new double[frames.Length];
             double tracked = Scale;
             for (int f = 0; f < frames.Length; f++)
@@ -370,26 +399,33 @@ public static class Decoder
             var self = readings.Select(SelfAddress).ToArray();
             var result = new int[frames.Length];
             Array.Fill(result, -1);
+            confirmed = new bool[frames.Length];
             // 物音で 2 ブロックが 1 つにつながったときも番地を数え違えないように、音の数からブロックの位置を求める
             var position = new int[frames.Length];
             for (int f = 1; f < frames.Length; f++) position[f] = position[f - 1] + Math.Max(1, (int)Math.Round((double)frames[f - 1].Length / FrameTones));
+            // 短い断片を捨てた所では、ブロックをいくつ数え損ねたか分からない。その向こうの番地は使わない
+            var segment = new int[frames.Length];
+            for (int f = 1; f < frames.Length; f++) segment[f] = segment[f - 1] + (frames[f][0] == frames[f - 1][^1] + 1 ? 0 : 1);
             for (int f = 0; f < frames.Length; f++)
             {
                 var votes = new Dictionary<int, int>();
                 for (int g = Math.Max(0, f - Reach); g <= Math.Min(frames.Length - 1, f + Reach); g++)
                 {
-                    if (self[g] < 0) continue;
+                    if (self[g] < 0 || segment[g] != segment[f]) continue;
                     int address = self[g] - (position[g] - position[f]) * DataBytes;
                     votes[address] = votes.GetValueOrDefault(address) + 1;
                 }
                 if (votes.Count == 0) continue;
-                var top = votes.OrderByDescending(v => v.Value).First();
+                var ranked = votes.OrderByDescending(v => v.Value).ToArray();
+                var top = ranked[0];
                 if (top.Key >= 0 && top.Key < 1 << 20) result[f] = top.Key;
+                // 自分の 1 票だけでは、番地のずれた読み違いを見分けられない。短い録音では読み違いの向きがそろって、正しい票に 2 対 1 で勝つこともある
+                confirmed[f] = top.Value >= 2 && top.Value > 2 * (ranked.Length > 1 ? ranked[1].Value : 0);
             }
             for (int pass = 0; pass < 2; pass++)
             {
-                for (int f = 1; f < frames.Length; f++) if (result[f] < 0 && result[f - 1] >= 0) result[f] = result[f - 1] + (position[f] - position[f - 1]) * DataBytes;
-                for (int f = frames.Length - 2; f >= 0; f--) if (result[f] < 0 && result[f + 1] >= DataBytes) result[f] = result[f + 1] - (position[f + 1] - position[f]) * DataBytes;
+                for (int f = 1; f < frames.Length; f++) if (result[f] < 0 && result[f - 1] >= 0 && segment[f] == segment[f - 1]) result[f] = result[f - 1] + (position[f] - position[f - 1]) * DataBytes;
+                for (int f = frames.Length - 2; f >= 0; f--) if (result[f] < 0 && result[f + 1] >= DataBytes && segment[f] == segment[f + 1]) result[f] = result[f + 1] - (position[f + 1] - position[f]) * DataBytes;
             }
             for (int f = 0; f < frames.Length; f++) if (result[f] >= 1 << 20) result[f] = -1;
             return result;
@@ -475,13 +511,13 @@ public static class Decoder
         bool Plausible(int f, int[] values)
         {
             if (!OnLattice(f, values)) return false;
-            for (int k = 1; k < FrameTones - 3; k++)
+            for (int k = 1; k <= DataBytes; k++)
             {
                 int i = frames[f][k], value = values[k];
                 if (value >= ShortValues) continue;     // 長い音は倍音が多く、周期を読み違えにくい
                 double tone = Periods * frameScale[f] * (90 + 4 * value + 4 * bias[value]) / 256;
                 if (Math.Abs(durations[i] - tone - valueRing[value]) > DurationLimit) return false;
-                if (double.IsNaN(intervals[i])) continue;
+                if (k == DataBytes || double.IsNaN(intervals[i])) continue;     // 最後のデータの音は、次の処理が違うので間隔を比べられない
                 double late = intervals[i] - tone - valueOverhead[value];
                 if (Math.Abs(late) > IntervalLimit && Math.Abs(late - KeyStretch) > IntervalLimit / 2) return false;   // キーを押している間は間隔だけ伸びる
             }
@@ -500,13 +536,12 @@ public static class Decoder
             {
                 var frame = frames[f];
                 if (addresses[f] >= 0 && Passes(previous[f], addresses[f]) && Plausible(f, previous[f])) { result[f] = previous[f]; return; }
-                var values = new int[frame.Length];
+                var values = ReadFrame(frame, frameScale[f]);     // 検査値の音の周期 2 倍の補正も、最新の片寄りも入る
                 var periodsOfValues = new double[ShortValues];
                 for (int v = 0; v < ShortValues; v++) periodsOfValues[v] = frameScale[f] * (90 + 4 * v + 4 * bias[v]);
                 for (int k = 0; k < frame.Length; k++)
                 {
                     int i = frame[k];
-                    values[k] = Nearest(periods[i], frameScale[f]).Value;
                     bool dataTone = frame.Length != FrameTones || (k >= 1 && k < FrameTones - 3);
                     if (periods[i] >= ReliablePeriod || !dataTone || double.IsNaN(intervals[i]) || intervals[i] > 80) continue;
                     var scores = reader.Scores(tones[i], periodsOfValues);
@@ -555,7 +590,7 @@ public static class Decoder
         /// <summary>検査値に合うように、読みの怪しい音を 2 番目の候補へ入れ替えて試す。候補がただ 1 つのときだけ採用する。</summary>
         int[]? Repair(int f, int[] values, int address)
         {
-            var candidates = Enumerable.Range(0, FrameTones)
+            var candidates = Enumerable.Range(1, FrameTones - 1)
                 .Select(k => (k, reading: Nearest(periods[frames[f][k]], frameScale[f])))
                 .OrderBy(c => c.reading.Margin).Take(10).ToArray();
             int[]? found = null;
@@ -564,7 +599,10 @@ public static class Decoder
             {
                 var trial = (int[])values.Clone();
                 foreach (var (k, reading) in flips) trial[k] = reading.Value == values[k] ? reading.Second : reading.Value;
-                if (Passes(trial, address)) { found = trial; hits++; }
+                if (!Passes(trial, address)) return;
+                hits++;
+                // 検査値の音を入れ替えて通っても、データが正しい証拠にならない。ほかの入れ替えが通っても、どちらが正しいか分からないので採らない
+                found = flips.All(f => f.k <= DataBytes) ? trial : null;
             }
             // 2 音以上を入れ替えると、偶然検査値に合う誤った組み合わせを受け入れてしまう（実機の録音で確かめた）
             foreach (var c in candidates) Try(c);

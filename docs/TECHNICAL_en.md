@@ -50,7 +50,7 @@ A bit is 310 cycles (at a delay of 130). Real hardware runs at about 760,000 cyc
 
 ### Changing the speed
 
-The second-to-last number of the `POKE` on BASIC line 10 (130 by default) is the half-bit delay. A bit is about `2 × delay + 50` cycles, so 100 gives about 3000bps. **Only 130 has been tested on real hardware.** The faster it goes, the more the ring of one toggle overlaps the next bit, so try a short range first.
+The second-to-last number of the `POKE` on BASIC line 15 (130 by default) is the half-bit delay. A bit is about `2 × delay + 50` cycles, so 100 gives about 3000bps. **Only 130 has been tested on real hardware.** The faster it goes, the more the ring of one toggle overlaps the next bit, so try a short range first.
 
 ### Reading
 
@@ -102,7 +102,7 @@ The period comes from the harmonics and is converted to a value. Short tones are
 
 The check is a sum, so these misreadings cannot be found by the check alone. Both happened on real recordings.
 
-- **Shifted address:** reading a value of 6 as 1 reduces the sum by 5, so the recovered address is 5 blocks away and the check still passes. The address is therefore decided by a vote among nearby blocks.
+- **Shifted address:** reading a value of 6 as 1 reduces the sum by 5, so the recovered address is 5 blocks away and the check still passes. The address is therefore decided by a vote among nearby blocks, and too few votes means the block counts as not read.
 - **Canceling errors:** reading values 2 and 13 as swapped leaves the sum unchanged. Short tones (values under 46) therefore reject a block if the value read contradicts the tone's duration and interval.
 
 This does not remove errors completely. For certainty, use the machine-code version or two recordings. The machine-code version has a running sum, which also catches swaps.
@@ -114,7 +114,7 @@ Recording devices capture sound differently, so there are 11 analyses that vary 
 - They run in order from "standard" and stop once everything is read.
 - From the second pattern on, the machine-code version only reads the blocks still missing, plus a few used for learning.
 - Three patterns in a row with no gain end the analysis, because a part ruined by noise will not be readable by another pattern.
-- Blocks that differ between patterns are decided by majority. A tie means not read.
+- A block that differs between patterns counts as not read. The patterns read the same audio, so agreement among more of them confirms nothing.
 
 ## What has been verified
 
@@ -123,7 +123,7 @@ Recording devices capture sound differently, so there are 11 analyses that vary 
 | Version | Model | Recording | Result |
 |---|---|---|---|
 | Machine code | PC-E500 | All main ROM, 15.3 min, audio of an iPhone video | 1024 / 1024 blocks. Byte-exact with the ROM image at hand |
-| Machine code | PC-U6000 | All main ROM, 15.5 min, audio of an iPhone video | 1024 / 1024 blocks (17 repaired). No wrong data |
+| Machine code | PC-U6000 | All main ROM, 15.5 min, audio of an iPhone video | 1024 / 1024 blocks (10 repaired). No wrong data |
 | Machine code | PC-U6000 | All extension ROM, 8.1 min, audio of an iPhone video | 512 / 512 blocks. With the main ROM, 384KB byte-exact with the ROM image at hand |
 | BASIC | PC-E500 | Stopped at 30 min (73KB) | 276 of 286 blocks (9 repaired). No wrong data in what was read |
 

@@ -139,9 +139,9 @@ ffmpeg -i IMG_3183.MOV -vn -c:a pcm_s16le IMG_3183.wav
 コマンドライン版は次の順に確かめます。
 
 ```sh
-beepdump --version          # beepdump 0.1.0 のように出る
+beepdump --version          # beepdump 0.2.0 のように出る
 beepdump listing --basic    # 打ち込むリストが出る
-beepdump decode -o test.rom 録音.wav
+beepdump decode -o test.rom 録音.wav    # test.rom が既にあれば --force が必要
 ```
 
 `decode` の終了コードは、全部読めたら 0、足りなければ 1、エラーは 2 です。録音が範囲の一部だけだと、足りない範囲が表示されて 1 になります。

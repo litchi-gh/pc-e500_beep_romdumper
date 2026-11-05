@@ -8,6 +8,13 @@ namespace BeepDump.Core;
 /// </summary>
 public static class AudioFile
 {
+    /// <summary>ファイルの内容の指紋。名前を変えたコピーを別の録音として数えないために使う。</summary>
+    public static string Fingerprint(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
+    }
+
     public static PcmAudio Load(string path, Action<double>? progress = null)
     {
         if (!File.Exists(path)) throw new IOException(Messages.Pick($"ファイルがありません: {path}", $"File not found: {path}"));
@@ -33,8 +40,15 @@ public static class AudioFile
         try
         {
             using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ffmpeg", "-version") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false });
-            process?.WaitForExit();
-            return process?.ExitCode == 0;
+            if (process == null) return false;
+            // 読まないとパイプが一杯になって止まる
+            process.OutputDataReceived += (_, _) => { };
+            process.ErrorDataReceived += (_, _) => { };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            if (process.WaitForExit(10000)) return process.ExitCode == 0;
+            process.Kill();
+            return false;
         }
         catch (Exception) { return false; }
     }
@@ -46,12 +60,13 @@ public static class AudioFile
             throw new IOException(Messages.Pick($"{Path.GetFileName(path)} を読むには ffmpeg が必要です。ffmpeg を入れるか、WAV に変換してください。",
                 $"Reading {Path.GetFileName(path)} needs ffmpeg. Install ffmpeg, or convert the recording to WAV."));
         var info = new System.Diagnostics.ProcessStartInfo("ffmpeg") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (string argument in new[] { "-v", "error", "-i", path, "-vn", "-map", "0:a:0", "-c:a", "pcm_s16le", "-f", "wav", "-" }) info.ArgumentList.Add(argument);
+        foreach (string argument in new[] { "-nostdin", "-v", "error", "-i", path, "-vn", "-map", "0:a:0", "-c:a", "pcm_s16le", "-f", "wav", "-" }) info.ArgumentList.Add(argument);
         using var process = System.Diagnostics.Process.Start(info) ?? throw new IOException("ffmpeg");
         var errors = process.StandardError.ReadToEndAsync();
         var audio = WavReader.Read(process.StandardOutput.BaseStream);
+        if (audio == null) process.Kill();     // 読み終わらないと ffmpeg は書き込みで止まったままになる
         process.WaitForExit();
-        if (audio == null || audio.Length == 0)
+        if (audio == null || audio.Length == 0 || process.ExitCode != 0)
             throw new IOException(Messages.Pick($"音声を読めませんでした: {errors.Result.Trim()}", $"Could not read the audio: {errors.Result.Trim()}"));
         return audio;
     }

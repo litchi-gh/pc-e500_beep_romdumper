@@ -112,13 +112,16 @@ foreach (double machine in new[] { 0.995, 1.002, 1.0065, 1.012, 1.02 })
         {
             var ff = new byte[256 * count];
             Array.Fill(ff, (byte)0xFF);
-            return Check(Decoder.Decode(Render(Stream(ff, 0x20000), scale: machine), 48000), ff, 0x20000);
+            // 1 ブロックだけだと番地を確かめられないので、BASIC 版は読めなかったことにする
+            var result = Decoder.Decode(Render(Stream(ff, 0x20000), scale: machine), 48000);
+            if (count == 1) return result.Blocks.All(b => b.State == BlockState.Failed) ? null : "an unconfirmed block was accepted";
+            return Check(result, ff, 0x20000);
         });
 Test("a short all-FF retake uses the clock found in the earlier recording", () =>
 {
     const double Machine = 1.012;
     var first = Decoder.Decode(Render(Stream(rom, Start), scale: Machine), 48000);
-    var ff = new byte[256];
+    var ff = new byte[512];
     Array.Fill(ff, (byte)0xFF);
     return Check(Decoder.Decode(Render(Stream(ff, 0x20000), scale: Machine), 48000, knownScale: first.Scale), ff, 0x20000);
 });
@@ -207,15 +210,98 @@ Test("blocks that disagree stay undecided until two recordings agree", () =>
     image.Add([new(Start, BlockState.Good, b)]);
     return image.Missing(model).Count == 0 && image.Build(model)[0] == 2 ? null : "agreement not used";
 });
-Test("a clean block replaces a repaired one", () =>
+Test("a repaired block read the same again becomes certain", () =>
 {
-    var model = new RomModel("test", [(Start, Start + 255)]);
+    var image = new RomImage();
+    var data = new byte[256];
+    image.Add([new Block(Start, BlockState.Repaired, data)]);
+    if (image.StateOf(Start) != BlockState.Repaired) return "first";
+    image.Add([new Block(Start, BlockState.Repaired, data)]);
+    return image.StateOf(Start) == BlockState.Good ? null : "not upgraded";
+});
+Test("confirmed content is not overtaken by a tie", () =>
+{
+    byte[] x = new byte[256], y = new byte[256];
+    y[0] = 1;
+    var image = new RomImage();
+    foreach (var data in new[] { x, x, y, y }) image.Add([new(Start, BlockState.Good, data)]);
+    if (image.StateOf(Start) != BlockState.Failed) return "a tie was decided";
+    image.Add([new(Start, BlockState.Good, x)]);
+    if (image.StateOf(Start) != BlockState.Good || image.Blocks.Single().Data[0] != 0) return "the leading content was not used";
+    return null;
+});
+Test("a BASIC recording at a low sample rate does not turn green", () =>
+{
+    var r = Decoder.Decode(Render(Stream(rom, Start), rate: 22050), 22050);
+    if (r.Blocks.Any(b => b.State == BlockState.Good)) return "a block is green";
+    return r.Blocks.Any(b => b.State == BlockState.Repaired) ? null : "nothing was read";
+});
+Test("saving replaces a ROM file and leaves no temporary file", () =>
+{
+    string path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+    try
+    {
+        var model = new RomModel("test", [(Start, Start + 255)]);
+        File.WriteAllBytes(path, [1, 2, 3]);
+        var image = new RomImage();
+        image.Add([new(Start, BlockState.Good, new byte[256])]);
+        image.Save(path, model);
+        if (new FileInfo(path).Length != 256) return "not replaced";
+        return File.Exists(path + ".tmp") ? "temporary file left" : null;
+    }
+    finally { File.Delete(path); }
+});
+Test("a retake starts before the missing blocks and is long enough", () =>
+{
+    var model = new RomModel("test", [(Start, Start + 0x1FFF)]);
+    var wide = RomImage.ForRetake([(Start + 0x500, Start + 0x5FF), (Start, Start + 0xFF), (Start + 0x1F00, Start + 0x1FFF), (Start + 0x400, Start + 0x13FF)], model);
+    if (wide[0] != (Start + 0x300, Start + 0xAFF)) return $"middle {wide[0]}";
+    if (wide[1] != (Start, Start + 0x7FF)) return $"first {wide[1]}";
+    if (wide[2] != (Start + 0x1800, Start + 0x1FFF)) return $"last {wide[2]}";
+    return wide[3] == (Start + 0x200, Start + 0x13FF) ? null : $"long {wide[3]}";
+});
+Test("BASIC: two blocks shifted the same way do not outvote a correct block", () =>
+{
+    var random = new Random(5);
+    var data = new byte[256 * 3];
+    for (int i = 0; i < data.Length; i++) data[i] = (byte)random.Next(64, 200);
+    // 2 ブロック目と 3 ブロック目で長い音を 1 段高く読むと、和が 1 増えて番地が 1 ブロック手前になり、検査も通る
+    var r = Decoder.Decode(Render(Stream(data, Start + 0x100, (b, i, v) => b >= 1 && i == 100 ? v + 1 : v)), 48000);
+    var read = r.Blocks.Where(b => b.State != BlockState.Failed).ToArray();
+    return read.Length == 0 ? null : "accepted: " + string.Join(" ", read.Select(b => $"{b.Address:X5}={b.State}"));
+});
+Test("a renamed copy of a recording has the same fingerprint", () =>
+{
+    string a = Path.GetTempFileName(), b = Path.GetTempFileName();
+    try
+    {
+        File.WriteAllBytes(a, [1, 2, 3]);
+        File.WriteAllBytes(b, [1, 2, 3]);
+        if (AudioFile.Fingerprint(a) != AudioFile.Fingerprint(b)) return "copies differ";
+        File.WriteAllBytes(b, [1, 2, 4]);
+        return AudioFile.Fingerprint(a) != AudioFile.Fingerprint(b) ? null : "different content matched";
+    }
+    finally { File.Delete(a); File.Delete(b); }
+});
+Test("ranges to confirm follow the repaired blocks", () =>
+{
+    var model = new RomModel("test", [(Start, Start + 1023)]);
+    var image = new RomImage();
+    image.Add([new(Start, BlockState.Good, new byte[256]), new(Start + 256, BlockState.Repaired, new byte[256]), new(Start + 512, BlockState.Repaired, new byte[256])]);
+    var unsure = image.Unsure(model);
+    if (unsure.Count != 1 || unsure[0] != (Start + 256, Start + 767)) return "unsure ranges";
+    return image.Missing(model).Single() == (Start + 768, Start + 1023) ? null : "missing ranges";
+});
+Test("a repaired block and a clean one that differ stay undecided", () =>
+{
     byte[] repaired = new byte[256], good = new byte[256];
     repaired[0] = 1; good[0] = 2;
     var image = new RomImage();
     image.Add([new(Start, BlockState.Repaired, repaired)]);
     image.Add([new(Start, BlockState.Good, good)]);
-    return image.Build(model)[0] == 2 && image.StateOf(Start) == BlockState.Good ? null : "repaired block kept";
+    if (image.StateOf(Start) != BlockState.Failed || image.Conflicts.Count == 0) return "not held back";
+    image.Add([new(Start, BlockState.Good, good)]);
+    return image.StateOf(Start) == BlockState.Good && image.Blocks.Single().Data[0] == 2 ? null : "not decided by a third recording";
 });
 Test("WAV reader: 16-bit stereo, 24-bit and float", () =>
 {
@@ -231,6 +317,9 @@ Test("WAV reader: 16-bit stereo, 24-bit and float", () =>
     if (stereo == null || stereo.Channels.Length != 2 || stereo.Length != 2 || stereo.Channels[1][1] != 4 || stereo.Rate != 48000) return "16-bit";
     var piped = WavReader.Read(new MemoryStream(Wav(1, 1, 16, [5, 0, 6, 0], unknownSize: true)));
     if (piped == null || piped.Length != 2 || piped.Channels[0][1] != 6) return "unknown size (from a pipe)";
+    var chunk = Wav(1, 1, 16, [7, 0, 8, 0]).Concat("LIST"u8.ToArray()).Concat(new byte[] { 4, 0, 0, 0, 1, 2, 3, 4 }).ToArray();
+    var trailing = WavReader.Read(new MemoryStream(chunk));
+    if (trailing == null || trailing.Length != 2) return "a chunk after data was read as samples";
     var deep = WavReader.Read(new MemoryStream(Wav(1, 1, 24, [0, 0x34, 0x12])));
     if (deep == null || deep.Channels[0][0] != 0x1234) return "24-bit";
     var real = WavReader.Read(new MemoryStream(Wav(3, 1, 32, BitConverter.GetBytes(0.5f))));
@@ -384,6 +473,42 @@ Test("fast: the level changing during a block (automatic gain control) is follow
     for (int i = 0; i < x.Length; i++) x[i] *= (float)(0.25 + 0.75 * (0.5 + 0.5 * Math.Sin(2 * Math.PI * i / 48000 / 3)));
     return Check(Decoder.Decode(x, 48000), fastRom, Start);
 });
+Test("fast: a short retake with the learning sequence joined to its only block is read", () =>
+{
+    var one = fastRom[..256];
+    var x = RenderFast(one, Start);
+    var bursts = Segmenter.Find(x, 48000, 0.0035).Where(t => t.End - t.Start > 0.15 * 48000).ToArray();
+    var random = new Random(3);
+    for (int i = bursts[0].End - 100; i < bursts[1].Start + 100; i++) x[i] += (float)(0.04 * (random.NextDouble() - 0.5));
+    if (Segmenter.Find(x, 48000, 0.0035).Count(t => t.End - t.Start > 0.15 * 48000) != 1) return "still separate";
+    var r = Decoder.Decode(x, 48000);
+    return r.Blocks.Count == 1 && r.Blocks[0].Address == Start && r.Blocks[0].State == BlockState.Repaired && r.Blocks[0].Data.SequenceEqual(one) ? null : "blocks: " + string.Join(" ", r.Blocks.Select(b => $"{b.Address:X5}={b.State}"));
+});
+Test("fast: a missing block does not make its neighbors stray", () =>
+{
+    var x = RenderFast(fastRom, Start);
+    var bursts = Segmenter.Find(x, 48000, 0.0035).Where(t => t.End - t.Start > 0.15 * 48000).ToArray();
+    Array.Clear(x, bursts[3].Start - 50, bursts[3].End - bursts[3].Start + 100);   // 3 番目のブロックの音を消す
+    var r = Decoder.Decode(x, 48000);
+    foreach (int k in new[] { 0, 1, 3, 4, 5, 6 })
+    {
+        int address = Start + k * 256;
+        if (!r.Blocks.Any(b => b.Address == address && b.State == BlockState.Good)) return $"lost {address:X5}: " + string.Join(" ", r.Blocks.Select(b => $"{b.Address:X5}={b.State}"));
+    }
+    return null;
+});
+Test("fast: a loud noise just before the learning sequence does not lose the recording", () =>
+{
+    var tone = RenderFast(fastRom, Start);
+    var random = new Random(7);
+    var x = new float[48000 + tone.Length];
+    for (int i = 12000; i < 12000 + 12000; i++) x[i] = (float)(0.08 * (random.NextDouble() - 0.5));     // 0.25 秒の物音
+    tone.CopyTo(x, 48000 - (int)(0.5 * 48000) + 12000);                                                 // 2 秒以内に学習用の並び
+    var r = Decoder.Decode(x, 48000);
+    foreach (var b in r.Blocks.Where(b => b.State != BlockState.Failed))
+        if (b.Address < Start || !b.Data.SequenceEqual(fastRom.AsSpan(b.Address - Start, 256).ToArray())) return $"wrong data at {b.Address:X5}";
+    return r.Blocks.Count(b => b.State == BlockState.Good) >= 5 ? null : "read: " + string.Join(" ", r.Blocks.Select(b => $"{b.Address:X5}={b.State}"));
+});
 Test("fast: a misread upper address byte does not move a block", () =>
 {
     // S2 は番地の上位 8 bit を見ていないので、S1 の上位バイトの読み違いは検査で分からない。ここを本物と同じ形で作る
@@ -416,6 +541,13 @@ Test("fast: noise that defeats the reading never gives wrong data", () =>
     return failed > 0 ? null : "the noise did not lose anything";
 });
 Test("fast: BASIC recordings are not mistaken for machine code", () => FastDecoder.LooksFast(Render(Stream(rom[..768], Start)), 48000) ? "detected as fast" : null);
+Test("fast: a long noise in a BASIC recording does not make it look like machine code", () =>
+{
+    var x = Render(Stream(rom[..768], Start));
+    var random = new Random(2);
+    for (int i = x.Length / 3; i < x.Length / 3 + 48000; i++) x[i] += (float)(0.2 * (random.NextDouble() - 0.5));
+    return FastDecoder.LooksFast(x, 48000) ? "detected as fast" : null;
+});
 
 Console.WriteLine(failures == 0 ? "All tests passed." : $"{failures} tests failed.");
 return failures == 0 ? 0 : 1;
