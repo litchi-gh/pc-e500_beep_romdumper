@@ -469,7 +469,7 @@ def tape_steps():
     y = 30
     steps = [
         (14, 104, ['BASIC', L('RUN モード', 'RUN mode')], GRAY_WASH),
-        (134, 216, [L('命令を打つ', 'Type the command'), 'CSAVE M "A",&HC0000,&HFFFFF'], GRAY_WASH),
+        (134, 216, [L('命令を打つ', 'Type the command'), 'CSAVE M &HC0000,&HFFFFF'], GRAY_WASH),
         (366, 96, [L('録音開始', 'Start recording')], '#f7d6d6'),
         (478, 72, ['ENTER'], GRAY_WASH),
         (566, 146, [L('音が鳴る（約 22 分）', 'Sound (about 22 min)'), L('キーに触らない', 'Do not touch keys')], BLUE_WASH),

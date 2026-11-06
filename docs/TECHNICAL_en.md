@@ -111,7 +111,7 @@ This does not remove errors completely. For certainty, use the machine-code vers
 
 ## CSAVE M sound format
 
-`CSAVE M "name",start,end` is a BASIC command that saves a range of memory to cassette. It is not in the manual. On real hardware it also sounds on the buzzer, so it plays the ROM with no program to type in. The name can be left out. The form `SAVE M "CAS:..."` gives `Bad drive name`.
+`CSAVE M start,end` is a BASIC command that saves a range of memory to cassette. It is not in the manual. On real hardware it also sounds on the buzzer, so it plays the ROM with no program to type in. To give it a name, write `CSAVE M "name",start,end`. The form `SAVE M "CAS:..."` gives `Bad drive name`.
 
 ![There is a header section and a data section. Each has a carrier, a run of long cycles, a run of short cycles, one long cycle, and then bytes. The data section ends with a 2-byte check value](figures/tape_stream_en.svg)
 

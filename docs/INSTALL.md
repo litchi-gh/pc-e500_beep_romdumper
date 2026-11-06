@@ -137,7 +137,7 @@ ffmpeg -i IMG_3183.MOV -vn -c:a pcm_s16le IMG_3183.wav
 コマンドライン版は次の順に確かめます。
 
 ```sh
-beepdump --version          # beepdump 0.3.0 のように出る
+beepdump --version          # beepdump 0.3.1 のように出る
 beepdump listing --basic    # 打ち込むリストが出る
 beepdump listing --csave    # CSAVE M の命令が出る
 beepdump decode -o test.rom 録音.wav    # test.rom が既にあれば --force が必要

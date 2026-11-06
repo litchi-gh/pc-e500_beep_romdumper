@@ -39,7 +39,7 @@ If something does not work, or you confirm something new, please tell us in [Iss
 
 | | CSAVE M | Machine code | BASIC |
 |---|---|---|---|
-| Typing | **1 line**, about 30 characters (no program) | 21 lines, about 900 characters | 2 lines, about 190 characters |
+| Typing | **1 line**, 23 characters (no program) | 21 lines, about 900 characters | 2 lines, about 190 characters |
 | Time for the 256KB main ROM | About 22 minutes (measured), twice | **15.3 minutes** (measured) | About 1.9 hours (estimated from a partial run) |
 | Read from one recording (real hardware) | 99.3 to 100% (the second recording fills in the rest) | **Everything** (PC-E500, PC-U6000) | About 96% (record the rest again) |
 | How the data is confirmed | **Comparing two recordings** (no check per block) | A check per block | A check per block (a sum, so weak) |
@@ -159,9 +159,9 @@ Put the phone near the buzzer, in a quiet room, and try not to move it. A fairly
 
    | Range | Command | Time |
    |---|---|---|
-   | Main ROM (all models) | `CSAVE M "A",&HC0000,&HFFFFF` | About 22 min |
-   | Extension ROM (PC-E650 / PC-U6000), the part with data | `CSAVE M "A",&H30000,&H33FFF` | About 1.5 min (calculated) |
-   | Whole extension ROM | `CSAVE M "A",&H20000,&H3FFFF` | About 16 min |
+   | Main ROM (all models) | `CSAVE M &HC0000,&HFFFFF` | About 22 min |
+   | Extension ROM (PC-E650 / PC-U6000), the part with data | `CSAVE M &H30000,&H33FFF` | About 1.5 min (calculated) |
+   | Whole extension ROM | `CSAVE M &H20000,&H3FFFF` | About 16 min |
 
 2. Wait for the sound to finish. **Do not touch the keys while it plays.** A steady tone plays twice, for about 7 seconds in all, before the sound of the data starts.
 3. When it finishes, `>` appears. Stop recording.

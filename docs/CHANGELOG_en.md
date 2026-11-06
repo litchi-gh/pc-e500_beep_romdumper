@@ -2,11 +2,17 @@
 
 [日本語](CHANGELOG.md)
 
+## 0.3.1 (2026-11-06)
+
+### Changed
+
+- The CSAVE M commands shown by the application and `beepdump` no longer include a file name, which was not needed. There is less to type. Reading is unchanged, and recordings with a name can still be read.
+
 ## 0.3.0 (2026-11-06)
 
 ### Added
 
-- **CSAVE M recordings can now be read.** The single line `CSAVE M "A",&HC0000,&HFFFFF` plays the ROM, so no program has to be typed in. The 256KB main ROM takes about 22 minutes.
+- **CSAVE M recordings can now be read.** The single line `CSAVE M &HC0000,&HFFFFF` plays the ROM, so no program has to be typed in. The 256KB main ROM takes about 22 minutes.
   - There is no check per block, so blocks read from one recording are yellow. They turn green when two recordings agree.
   - Checked on 8 recordings from a real PC-E500, PC-E550, PC-1480U, PC-E650, and PC-U6000, with 0 bytes of wrong data. Places with noise count as not read and turn red.
 - CSAVE M was added to the method selector in the application. It shows the command to type, the steps, what the colors mean, and the commands for missing ranges. Reading a CSAVE M recording switches to it automatically.

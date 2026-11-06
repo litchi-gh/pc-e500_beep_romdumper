@@ -137,7 +137,7 @@ Do not change the level or lower the sample rate in the conversion.
 Check the command-line version in this order:
 
 ```sh
-beepdump --version          # prints something like beepdump 0.3.0
+beepdump --version          # prints something like beepdump 0.3.1
 beepdump listing --basic    # prints the listing to type in
 beepdump listing --csave    # prints the CSAVE M commands
 beepdump decode -o test.rom recording.wav    # needs --force if test.rom exists

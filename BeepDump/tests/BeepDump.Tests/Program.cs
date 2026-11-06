@@ -752,7 +752,7 @@ Test("CSAVE M: BASIC and machine-code recordings are not taken for it", () =>
     PcmAudio Pcm(float[] v) => new([v.Select(s => (short)Math.Clamp(s * 32767, -32767, 32767)).ToArray()], 48000);
     return Analyzer.TryTape(Pcm(Render(Stream(rom[..768], Start)))) != null ? "BASIC" : Analyzer.TryTape(Pcm(RenderFast(fastRom, Start))) != null ? "machine code" : null;
 });
-Test("CSAVE M: the commands for a model", () => RomModel.Main384.TapeListing.ReplaceLineEndings("|") == "CSAVE M \"A\",&H20000,&H3FFFF|CSAVE M \"A\",&HC0000,&HFFFFF" ? null : RomModel.Main384.TapeListing);
+Test("CSAVE M: the commands for a model", () => RomModel.Main384.TapeListing.ReplaceLineEndings("|") == "CSAVE M &H20000,&H3FFFF|CSAVE M &HC0000,&HFFFFF" ? null : RomModel.Main384.TapeListing);
 
 Console.WriteLine(failures == 0 ? "All tests passed." : $"{failures} tests failed.");
 return failures == 0 ? 0 : 1;

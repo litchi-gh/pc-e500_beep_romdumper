@@ -10,7 +10,7 @@ public sealed record RomModel(string Name, (int Start, int End)[] Ranges)
     public int Size => Ranges.Sum(r => r.End - r.Start + 1);
 
     /// <summary>範囲を録音する CSAVE M の命令。</summary>
-    public static string TapeCommand(int start, int end) => $"CSAVE M \"A\",&H{start:X5},&H{end:X5}";
+    public static string TapeCommand(int start, int end) => $"CSAVE M &H{start:X5},&H{end:X5}";
 
     /// <summary>この機種の ROM をすべて録音する CSAVE M の命令。</summary>
     public string TapeListing => string.Join(Environment.NewLine, Ranges.Select(r => TapeCommand(r.Start, r.End)));
