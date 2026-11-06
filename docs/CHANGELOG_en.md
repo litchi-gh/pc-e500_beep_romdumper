@@ -2,6 +2,26 @@
 
 [日本語](CHANGELOG.md)
 
+## 0.3.0 (2026-11-06)
+
+### Added
+
+- **CSAVE M recordings can now be read.** The single line `CSAVE M "A",&HC0000,&HFFFFF` plays the ROM, so no program has to be typed in. The 256KB main ROM takes about 22 minutes.
+  - There is no check per block, so blocks read from one recording are yellow. They turn green when two recordings agree.
+  - Checked on 8 recordings from a real PC-E500, PC-E550, PC-1480U, PC-E650, and PC-U6000, with 0 bytes of wrong data. Places with noise count as not read and turn red.
+- CSAVE M was added to the method selector in the application. It shows the command to type, the steps, what the colors mean, and the commands for missing ranges. Reading a CSAVE M recording switches to it automatically.
+- `beepdump listing --csave` prints the commands. `beepdump decode` also reads CSAVE M recordings, and lists missing ranges as commands.
+
+### Changed
+
+- The controls at the top of the application window were rearranged: the model and buttons on the first row, the method and language on the second.
+
+### Fixed
+
+- Part of the window was misdrawn at 150% display scaling. The heights of the text boxes and the grid labels now come from the font height and the scale.
+- Hard machine-code recordings were slow to analyze (24 minutes down to about 3 on a real PC-U6000 recording). The level-smoothing pattern took the room noise before and after the sound for the sound itself, learned from it, and read every block again. From the second pattern on, only the range of sound read first is used.
+- On the machine-code version, noise at the end of a recording could be given an address, showing a block that does not exist (such as `00000` or `40000`) as not read. While such a block remained, the analysis went on even with everything read.
+
 ## 0.2.0 (2026-11-05)
 
 ### Changed

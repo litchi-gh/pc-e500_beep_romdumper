@@ -138,8 +138,8 @@ def overview():
     y = 26
     centers = (86, 250, 424, 588, 770)
     captions = [
-        (L('1. プログラムを打ち込む', '1. Type in the program'), L('機械語版は 21 行', '21 lines (machine code)')),
-        (L('2. RUN で ROM を鳴らす', '2. RUN plays the ROM'), L('ブザーの音で流れる', 'on the buzzer')),
+        (L('1. 命令を打ち込む', '1. Type it in'), L('CSAVE M なら 1 行', 'one line with CSAVE M')),
+        (L('2. ROM を鳴らす', '2. Play the ROM'), L('ブザーの音で流れる', 'on the buzzer')),
         (L('3. スマホで録音', '3. Record with a phone'), L('録画でもよい', 'video is fine too')),
         (L('4. BeepDump で読む', '4. Read with BeepDump'), L('音をデータに戻す', 'sound back to data')),
         (L('5. ROM ファイル', '5. ROM file'), L('エミュレータなどで使う', 'for an emulator and so on')),
@@ -208,10 +208,11 @@ def recording_steps():
 
 
 def time_compare():
-    f = Figure('time_compare', 860, 118, L('本体 ROM 256KB にかかる時間', 'Time for the 256KB main ROM'))
-    f.text(16, 24, L('本体 ROM 256KB にかかる時間（分）', 'Time for the 256KB main ROM (minutes)'), weight=600)
+    f = Figure('time_compare', 860, 152, L('本体 ROM 256KB にかかる時間', 'Time for the 256KB main ROM'))
+    f.text(16, 24, L('本体 ROM 256KB を 1 回録音する時間（分）', 'Time to record the 256KB main ROM once (minutes)'), weight=600)
     left, full = 150, 620
     rows = [(L('機械語版', 'Machine code'), 15.3, L('15.3 分（実測）', '15.3 min (measured)')),
+            ('CSAVE M', 22.2, L('約 22 分（実測。確かめるには 2 回録音）', 'About 22 min (measured; record twice to confirm)')),
             (L('BASIC 版', 'BASIC'), 114, L('約 1.9 時間（途中までの実測からの推定）', 'About 1.9 hours (estimated from a partial run)'))]
     for i, (name, value, label) in enumerate(rows):
         y = 44 + i * 34
@@ -463,6 +464,139 @@ def basic_frame():
     f.save()
 
 
+def tape_steps():
+    f = Figure('tape_steps', 860, 158, L('CSAVE M の録音の流れ', 'Recording with CSAVE M'))
+    y = 30
+    steps = [
+        (14, 104, ['BASIC', L('RUN モード', 'RUN mode')], GRAY_WASH),
+        (134, 216, [L('命令を打つ', 'Type the command'), 'CSAVE M "A",&HC0000,&HFFFFF'], GRAY_WASH),
+        (366, 96, [L('録音開始', 'Start recording')], '#f7d6d6'),
+        (478, 72, ['ENTER'], GRAY_WASH),
+        (566, 146, [L('音が鳴る（約 22 分）', 'Sound (about 22 min)'), L('キーに触らない', 'Do not touch keys')], BLUE_WASH),
+        (728, 118, [L('> が出たら', 'At >,'), L('録音停止', 'stop recording')], '#f7d6d6'),
+    ]
+    for i, (x, w, lines, fill) in enumerate(steps):
+        f.box(x, y, w, 58, lines, fill=fill, size=12)
+        if i:
+            px, pw = steps[i - 1][0], steps[i - 1][1]
+            f.arrow(px + pw + 1, y + 29, x - 1, y + 29)
+    f.line(14, y + 86, 846, y + 86, AXIS)
+    f.path(f'M414 {y + 58} L414 {y + 76}', stroke=CRITICAL, arrow=True)
+    f.text(430, y + 106, L('ENTER を押す前に録音を始める。読み違いを見つけるため、同じことをもう 1 回録音する', 'Start recording before ENTER. Then record it all once more, so that misreads can be found'), anchor='middle', weight=600)
+    f.save()
+
+
+def tape_stream():
+    f = Figure('tape_stream', 860, 196, L('CSAVE M の音の並び', 'CSAVE M sound layout'))
+    def section(y, title, parts):
+        f.text(16, y - 8, title, weight=600)
+        x = 16
+        for w, lines, fill in parts:
+            f.box(x, y, w - 2, 46, lines, fill=fill, size=12)
+            x += w
+    section(32, L('ヘッダの区間', 'Header section'), [
+        (230, [L('搬送音', 'Carrier'), L('10000 周期、約 3.3 秒', '10000 cycles, about 3.3 s')], GRAY_WASH),
+        (82, [L('長', 'Long'), L('40 周期', '40 cycles')], GRAY_WASH), (82, [L('短', 'Short'), L('40 周期', '40 cycles')], GRAY_WASH), (70, [L('長', 'Long'), L('1 周期', '1 cycle')], GRAY_WASH),
+        (364, [L('ヘッダ 50 バイト', '50 header bytes'), L('開始番地、長さ、名前', 'start address, length, name')], ORANGE_WASH)])
+    section(112, L('本体の区間', 'Data section'), [
+        (230, [L('搬送音', 'Carrier'), L('11000 周期、約 3.7 秒', '11000 cycles, about 3.7 s')], GRAY_WASH),
+        (82, [L('長', 'Long'), L('20 周期', '20 cycles')], GRAY_WASH), (82, [L('短', 'Short'), L('20 周期', '20 cycles')], GRAY_WASH), (70, [L('長', 'Long'), L('1 周期', '1 cycle')], GRAY_WASH),
+        (244, [L('データ', 'Data'), L('開始番地から長さの分', 'from the start address')], BLUE_WASH),
+        (120, [L('検査値 2 バイト', '2-byte check'), L('1 のビットの数', 'count of 1 bits')], ORANGE_WASH)])
+    f.text(16, 182, L('データの中に番地やブロックごとの検査値はなく、最後の検査値はデータ全体で 1 つだけ', 'The data carries no addresses and no per-block checks; the only check is one value at the very end'), size=12, fill=SECONDARY)
+    f.save()
+
+
+def tape_frame():
+    f = Figure('tape_frame', 860, 232, L('CSAVE M の 1 バイト', 'One CSAVE M byte'))
+    long_w, short_w, gap_w = 62, 25, 8
+    x0, y_hi, y_lo = 40, 64, 104
+    labels = [('S', True)] + [(str(b), b == 1) for b in (1, 0, 1, 0, 0, 1, 0, 1)]
+    x = x0
+    d = [f'M{x0 - 24} {y_lo}']
+    for label, is_long in labels:
+        w = long_w if is_long else short_w
+        f.rect(x, 30, w - 1, 86, ORANGE_WASH if label == 'S' else BLUE_WASH if is_long else GRAY_WASH, r=2)
+        f.text(x + w / 2, 47, label, size=13, anchor='middle', weight=600, mono=True)
+        d.append(f'L{x} {y_lo}L{x} {y_hi}L{x + w / 2} {y_hi}L{x + w / 2} {y_lo}L{x + w} {y_lo}')
+        x += w
+    d.append(f'L{x + gap_w} {y_lo}L{x + gap_w} {y_hi}L{x + gap_w + long_w / 2} {y_hi}')
+    f.path(''.join(d), stroke=INK, width=2)
+    f.text(x + gap_w + long_w / 2 + 8, y_hi + 4, L('次のバイト', 'next byte'), size=12, fill=SECONDARY)
+    f.text(x0, 136, L('S = 開始ビット（必ず長い周期）。続いてデータを上位ビットから 1 周期ずつ送る。この例は A5h', 'S = start bit (always long). The data follows, MSB first, one cycle per bit. This example is A5h'), size=13)
+    rows = [(L('データの 1', 'Data 1'), L('長い周期（約 1217 Hz、0.82 ms）', 'long cycle (about 1217 Hz, 0.82 ms)')),
+            (L('データの 0', 'Data 0'), L('短い周期（約 3041 Hz、0.33 ms）', 'short cycle (about 3041 Hz, 0.33 ms)')),
+            (L('バイトの長さ', 'Byte length'), L('FFh は 7.45 ms、00h は 3.51 ms。時間は中身の 1 の数で決まる', 'FFh takes 7.45 ms and 00h takes 3.51 ms: the time depends on the number of 1 bits'))]
+    for i, (name, value) in enumerate(rows):
+        f.text(40, 164 + i * 22, name, size=13, weight=600)
+        f.text(140, 164 + i * 22, value, size=13, fill=SECONDARY)
+    f.save()
+
+
+def tape_retake():
+    f = Figure('tape_retake', 860, 214, L('CSAVE M を 2 回録音した実際の結果', 'A real result of recording CSAVE M twice'))
+    f.text(16, 24, L('PC-E650 の本体 ROM（C0000-FFFFF、1024 ブロック）', 'PC-E650 main ROM (C0000-FFFFF, 1024 blocks)'), weight=600)
+    left, width = 130, 700
+    red = [0xD9200, 0xDC000, 0xEE100, 0xF3A00, 0xF7A00, 0xF9700, 0xFB700]
+    def at(a):
+        return left + (a - 0xC0000) / 0x40000 * width
+    rows = [(L('1 回目', '1st take'), WARNING, CRITICAL), (L('2 回目', '2nd take'), WARNING, None), (L('合わせた結果', 'Combined'), GOOD, WARNING)]
+    for r, (name, base, mark) in enumerate(rows):
+        y = 40 + r * 38
+        f.text(left - 12, y + 18, name, anchor='end', size=13, fill=SECONDARY)
+        f.rect(left, y, width, 26, base, r=2)
+        if mark:
+            for a in red:
+                f.rect(at(a), y, 3, 26, mark)
+    y = 40 + 3 * 38 - 4
+    for a in range(0xC0000, 0x100000, 0x10000):
+        f.line(at(a), y, at(a), y + 4, AXIS)
+        f.text(at(a), y + 18, f'{a:05X}', size=12, fill=MUTED, anchor='middle', mono=True)
+    x = left
+    for label, color in ((L('2 回の録音が一致', 'Two takes agree'), GOOD), (L('読めたが 1 回だけで未確認', 'Read once, not confirmed'), WARNING), (L('読めなかった', 'Not read'), CRITICAL)):
+        f.rect(x, 184, 13, 13, color, r=2)
+        f.text(x + 19, 195, label, size=12, fill=SECONDARY)
+        x += 40 + len(label) * (13 if lang == 'ja' else 7)
+    f.save()
+
+
+def tape_pipeline():
+    f = Figure('tape_pipeline', 860, 300, L('CSAVE M の読み取りの流れ', 'How CSAVE M is read'))
+    steps = [
+        (L('搬送音を探す', 'Find the carriers'), L('10000 周期と 11000 周期の組', 'a pair of 10000 and 11000 cycles')),
+        (L('ヘッダの前半で学ぶ', 'Learn from the header start'), L('01h、名前、0Dh は形が決まっている', '01h, name, 0Dh are predictable')),
+        (L('本体を 3000 バイト読む', 'Read 3000 data bytes'), L('応答とビットの長さを学び直す', 'relearn the response and bit lengths')),
+        (L('ヘッダを読む', 'Read the header'), L('位置を変えて読み、多数決で決める', 'read at many offsets and vote')),
+    ]
+    x = 16
+    for i, (a, b) in enumerate(steps):
+        f.box(x, 22, 192, 62, [a, b], size=12)
+        if i < 3:
+            f.arrow(x + 192, 53, x + 214, 53)
+        x += 214
+    f.path('M766 84 L766 108 L112 108 L112 124', arrow=True)
+    f.text(430, 102, L('ヘッダが読めなければ、位置をずらして本体からやり直す（最大 9 通り）', 'If the header cannot be read, shift the position and redo the data (up to 9 tries)'), size=12, fill=SECONDARY, anchor='middle')
+    f.rect(16, 124, 828, 84, BLUE_WASH, r=8)
+    f.text(30, 144, L('本体を最後まで読む', 'Read all the data'), weight=600)
+    x = 30
+    for i, (a, b) in enumerate((
+            (L('1 バイトずつ', 'Byte by byte'), L('256 通りの波形と比べる', 'compare 256 waveforms')),
+            (L('FFh の並び', 'FFh runs'), L('時間から数を数える', 'count them by time')),
+            (L('見失ったら', 'If lost'), L('戻って別の道も試す', 'back up, try other paths')),
+            (L('仕上げ', 'Polish'), L('ビットの入れ替わりを直す', 'fix swapped bits')))):
+        f.box(x, 152, 188, 46, [a, b], fill=SURFACE, size=12)
+        if i < 3:
+            f.arrow(x + 188, 175, x + 202, 175)
+        x += 202
+    f.arrow(430, 208, 430, 228)
+    f.box(16, 228, 268, 56, [L('物音の大きかったバイトを除く', 'Drop bytes under loud noise'), L('含むブロックは読めなかったことに（赤）', 'their blocks count as not read (red)')], size=12)
+    f.arrow(284, 256, 300, 256)
+    f.box(300, 228, 260, 56, [L('ヘッダの番地から順に番地を付ける', 'Number from the header address'), L('読めたブロックはすべて黄', 'every block read is yellow')], size=12)
+    f.arrow(560, 256, 576, 256)
+    f.box(576, 228, 268, 56, [L('ほかの録音と比べる', 'Compare with other recordings'), L('一致すれば緑、違えば赤', 'green if they agree, red if not')], size=12)
+    f.save()
+
+
 # ---------------------------------------------------------------- ANALYSIS
 
 def pipeline():
@@ -472,6 +606,12 @@ def pipeline():
     f.arrow(cx, 56, cx, 80)
     f.box(cx - 110, 80, 220, 40, L('1. 音声の読み込み', '1. Load the audio'))
     f.arrow(cx, 120, cx, 150)
+    # CSAVE M はパターンを通らない
+    f.arrow(cx + 110, 100, 318, 100)
+    f.box(318, 80, 200, 40, [L('4. 長い搬送音があれば', '4. A long carrier means'), 'CSAVE M'], fill=ORANGE_WASH, size=12)
+    f.arrow(518, 100, 566, 100)
+    f.box(566, 80, 240, 40, [L('9. CSAVE M の読み取り', '9. CSAVE M reading'), L('1 バイトずつ、波形を比べる', 'waveforms, byte by byte')], fill=ORANGE_WASH, size=12)
+    f.path('M806 100 L850 100 L850 330 L460 330 L460 344', arrow=True)
     # パターンの枠
     f.rect(20, 150, 820, 166, BLUE_WASH, r=8)
     f.text(34, 171, L('解析パターンごと（「標準」から順に）', 'For each analysis pattern (from "standard")'), weight=600)
@@ -487,7 +627,7 @@ def pipeline():
     f.path(f'M{x - 10} {y + 48} L{x - 10} {y + 76} L{x - 1} {y + 76}', arrow=True)
     f.text(430, 306, L('全部読めたら終わり。読めていなければ次のパターンで、残りを読む', 'Stop once everything is read; otherwise the next pattern reads the rest'), size=12, fill=SECONDARY, anchor='middle')
     f.arrow(cx, 316, cx, 344)
-    f.box(cx - 110, 344, 220, 48, [L('7. パターンの統合', '7. Combine patterns'), L('多数決', 'majority vote')])
+    f.box(cx - 110, 344, 220, 48, [L('7. パターンの統合', '7. Combine patterns'), L('食い違いは読めなかったことに', 'disagreements count as not read')])
     f.arrow(cx + 110, 368, 340, 368)
     f.box(340, 344, 240, 48, [L('8. 録音の統合', '8. Combine recordings'), L('補い合う、食い違いは保留', 'fill gaps, hold disagreements')])
     f.arrow(580, 368, 620, 368)
@@ -856,7 +996,7 @@ def device_chart(name, rows, full, ticks, title, note):
     f.save()
 
 
-FIGURES = [devices, devices_basic, install_choice, result_grid, repair, overview, recording_steps, time_compare, retake, rom_map, fast_stream, biphase, basic_frame, pipeline, gap_envelope, response, model, split, candidates, decision, refit_loop, address_check, stage_gain, comb, scale_search]
+FIGURES = [devices, devices_basic, install_choice, result_grid, repair, overview, recording_steps, tape_steps, time_compare, retake, tape_retake, rom_map, fast_stream, biphase, basic_frame, tape_stream, tape_frame, tape_pipeline, pipeline, gap_envelope, response, model, split, candidates, decision, refit_loop, address_check, stage_gain, comb, scale_search]
 
 if __name__ == '__main__':
     for lang in ('ja', 'en'):

@@ -54,7 +54,7 @@ Git がなければ、GitHub のページの Code → Download ZIP で取得し�
 .\build.cmd -TestOnly  # テストだけ
 ```
 
-テストに数分かかります。`BeepDump.exe` を開いたままだと更新できないので、閉じてから実行します。
+テストに 10 分ほどかかります。`BeepDump.exe` を開いたままだと更新できないので、閉じてから実行します。
 
 ### Linux、macOS
 
@@ -75,7 +75,7 @@ dotnet publish src/BeepDump.Cli -c Release -r linux-x64 --self-contained true \
 | macOS（Apple Silicon） | `osx-arm64` |
 | macOS（Intel） | `osx-x64` |
 
-> **未確認:** Linux と macOS の上でのビルドは試していません。確認したのは、Windows で `.\build.cmd -Cli` を使ってビルドできることと、できた `linux-x64` 版を WSL の Ubuntu で動かすことです。
+> 確認したのは、Windows で `.\build.cmd -Cli` を使ってビルドできることと、できた `linux-x64` 版を WSL の Ubuntu で動かすことです。
 
 ビルドせずにそのまま動かすこともできます。
 
@@ -92,9 +92,9 @@ dotnet run --project src/BeepDump.Cli -c Release -- decode 録音.wav
 | `BeepDump.exe` | 画面のあるアプリ（Windows） | 約 50MB |
 | `cli/win-x64/beepdump.exe` | コマンドライン版（Windows） | 約 36MB |
 | `cli/linux-x64/beepdump` | コマンドライン版（Linux x64） | 約 38MB |
-| `cli/linux-arm64/beepdump` | コマンドライン版（Linux Arm64、未確認） | 約 36MB |
-| `cli/osx-x64/beepdump` | コマンドライン版（macOS Intel、未確認） | 約 37MB |
-| `cli/osx-arm64/beepdump` | コマンドライン版（macOS Apple Silicon、未確認） | 約 35MB |
+| `cli/linux-arm64/beepdump` | コマンドライン版（Linux Arm64） | 約 36MB |
+| `cli/osx-x64/beepdump` | コマンドライン版（macOS Intel） | 約 37MB |
+| `cli/osx-arm64/beepdump` | コマンドライン版（macOS Apple Silicon） | 約 35MB |
 
 置き場所は [INSTALL.md](INSTALL.md) を見てください。
 

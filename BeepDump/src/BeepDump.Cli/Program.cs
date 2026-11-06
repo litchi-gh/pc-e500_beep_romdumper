@@ -6,7 +6,8 @@ beepdump - rebuild a PC-E500 series ROM from a recording of its buzzer
 
 Usage:
   beepdump decode [options] <recording>...   Read recordings and write the ROM
-  beepdump listing [--basic]                 Print the program to type in
+  beepdump listing [--basic | --csave] [-m MODEL]
+                                             Print what to type in
   beepdump --help | --version
 
 Options for decode:
@@ -21,9 +22,14 @@ Options for decode:
 
 Options for listing:
       --basic         The BASIC version (default: the machine-code version)
+      --csave         The CSAVE M commands: one line each, no program to type
+  -m, --model MODEL   e500 or e650, for --csave
 
 Recordings: WAV is always readable. Other formats (MOV, MP4, M4A, ...) use Media
 Foundation on Windows and need ffmpeg on the PATH on Linux and macOS.
+
+CSAVE M has no check per block, so a single recording cannot be confirmed: its
+blocks count as repaired until a second recording agrees.
 
 Several recordings fill each other's gaps. Exit code: 0 = every block was read,
 1 = some are missing (the ROM is still written, with FFh there), 2 = error
@@ -55,13 +61,24 @@ static int Fail(string message)
 
 static int Listing(string[] args)
 {
-    bool basic = false;
-    foreach (string a in args)
+    bool basic = false, csave = false;
+    var model = RomModel.Main256;
+    for (int i = 0; i < args.Length; i++)
     {
+        string a = args[i];
         if (a == "--basic") basic = true;
+        else if (a == "--csave") csave = true;
+        else if (a is "-m" or "--model")
+        {
+            if (++i >= args.Length) return Fail($"{a} needs a value.");
+            string name = args[i].ToLowerInvariant();
+            if (name is not ("e500" or "e650")) return Fail($"Unknown model: {name} (use e500 or e650).");
+            model = name == "e650" ? RomModel.Main384 : RomModel.Main256;
+        }
         else return Fail($"Unknown option: {a}");
     }
-    Console.WriteLine((basic ? FastCode.BasicListing : FastCode.MachineListing).ReplaceLineEndings());
+    if (basic && csave) return Fail("Choose either --basic or --csave.");
+    Console.WriteLine((csave ? model.TapeListing : basic ? FastCode.BasicListing : FastCode.MachineListing).ReplaceLineEndings());
     return 0;
 }
 
@@ -69,7 +86,7 @@ static int Decode(string[] args)
 {
     var files = new List<string>();
     string output = "beepdump.rom";
-    bool force = false, trouble = false;
+    bool force = false, trouble = false, tape = false;
     string? tracePath = null;
     var model = RomModel.Main256;
     bool single = false, quiet = false;
@@ -128,9 +145,11 @@ static int Decode(string[] args)
                 continue;
             }
             audio = AudioFile.Load(file, f => Show("Loading audio", f));
-            result = single
-                ? Decoder.Decode(Analyzer.Prepare(audio, Analyzer.Patterns[0]), audio.Rate, Show, trace == null ? null : trace.WriteLine, knownScale)
-                : Analyzer.Analyze(audio, Show, trace == null ? null : trace.WriteLine, knownScale);
+            result = Analyzer.TryTape(audio, Show)
+                ?? (single
+                    ? Decoder.Decode(Analyzer.Prepare(audio, Analyzer.Patterns[0]), audio.Rate, Show, trace == null ? null : trace.WriteLine, knownScale)
+                    : Analyzer.Analyze(audio, Show, trace == null ? null : trace.WriteLine, knownScale));
+            tape |= result.Tape;
         }
         catch (Exception e)
         {
@@ -144,7 +163,9 @@ static int Decode(string[] args)
         image.Add(result.Blocks);
         if (result.Scale > 0 && result.Blocks.Any(b => b.State == BlockState.Good)) knownScale = result.Scale;
         int repaired = result.Blocks.Count(b => b.State == BlockState.Repaired), failed = result.Blocks.Count(b => b.State == BlockState.Failed);
-        Console.WriteLine($"{Path.GetFileName(file)}: {audio.Seconds:F1} s, {result.Blocks.Count - repaired - failed} blocks read, {repaired} repaired, {failed} failed");
+        Console.WriteLine(result.Tape
+            ? $"{Path.GetFileName(file)}: {audio.Seconds:F1} s, {repaired} blocks read (not confirmed), {failed} failed"
+            : $"{Path.GetFileName(file)}: {audio.Seconds:F1} s, {result.Blocks.Count - repaired - failed} blocks read, {repaired} repaired, {failed} failed");
         foreach (string note in result.Notes) Console.WriteLine("  " + note);
         foreach (var b in result.Blocks.Where(b => b.State == BlockState.Failed)) Console.WriteLine($"  failed: {b.Address:X5}");
     }
@@ -169,17 +190,18 @@ static int Decode(string[] args)
     var missing = image.Missing(model);
     Console.WriteLine($"Wrote {output} ({model.Size} bytes).");
     var unsure = image.Unsure(model);
+    string Line(int start, int end) => tape ? "  " + RomModel.TapeCommand(start, end) : $"  &H{start:X5}  &H{end:X5}";
     if (unsure.Count > 0)
     {
         Console.WriteLine("These ranges were repaired or could not be fully confirmed. Record them once more to be certain:");
-        foreach (var (start, end) in RomImage.ForRetake(unsure, model)) Console.WriteLine($"  &H{start:X5}  &H{end:X5}");
+        foreach (var (start, end) in RomImage.ForRetake(unsure, model)) Console.WriteLine(Line(start, end));
     }
     if (missing.Count == 0)
     {
         Console.WriteLine("Every block was read.");
         return trouble ? 2 : 0;
     }
-    Console.WriteLine("Missing, filled with FFh. Record these ranges (answers to the two ? prompts):");
-    foreach (var (start, end) in RomImage.ForRetake(missing, model)) Console.WriteLine($"  &H{start:X5}  &H{end:X5}");
+    Console.WriteLine(tape ? "Missing, filled with FFh. Record these ranges:" : "Missing, filled with FFh. Record these ranges (answers to the two ? prompts):");
+    foreach (var (start, end) in RomImage.ForRetake(missing, model)) Console.WriteLine(Line(start, end));
     return trouble ? 2 : 1;
 }

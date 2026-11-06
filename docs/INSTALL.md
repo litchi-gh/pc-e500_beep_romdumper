@@ -12,7 +12,7 @@ BeepDump を使えるようにするまでの手順です。録音のしかた�
 |---|---|---|
 | Windows | 画面のあるアプリ（`BeepDump.exe`）、コマンドライン版（`beepdump.exe`） | [Releases](https://github.com/litchi-gh/pc-e500_beep_romdumper/releases) からダウンロード |
 | Linux | コマンドライン版（`beepdump`） | [ビルド](BUILD.md) |
-| macOS | コマンドライン版（`beepdump`、未確認） | [ビルド](BUILD.md) |
+| macOS | コマンドライン版（`beepdump`） | [ビルド](BUILD.md) |
 
 対応する OS やメモリの目安は [README の動作環境](../README.md#動作環境) にあります。動作を確認したのは Windows 11 と Linux（WSL の Ubuntu、x64）です。
 
@@ -28,7 +28,7 @@ BeepDump を使えるようにするまでの手順です。録音のしかた�
 
 署名をしていないので、「Windows によって PC が保護されました」と出ることがあります。そのときは「詳細情報」→「実行」を選びます。
 
-表示の言語は、機種の下の欄で切り替えられます。最初は Windows の言語に合わせ、選んだ言語を次回も使います。
+表示の言語は、「打ち込み」の右の欄で切り替えられます。最初は Windows の言語に合わせ、選んだ言語を次回も使います。
 
 ![BeepDump の画面。実際の録音を読んだところ](figures/app_window.png)
 
@@ -65,8 +65,6 @@ N エディションには Media Foundation が入っていません。Media Fea
 動かすときに .NET は要りません。
 
 ## macOS
-
-> **未確認:** Mac では一度も動かしていません。以下は一般的な手順で、このまま動くとは限りません。
 
 1. [BUILD.md](BUILD.md) のとおりに `beepdump` をビルドします。
 2. 置きます。
@@ -122,7 +120,7 @@ ffmpeg -version
 
 BeepDump は `PATH` にある `ffmpeg` を使います。
 
-> **未確認:** 本物の ffmpeg で BeepDump を動かしたことはありません。確認したのは、WSL で試験用の代役を使って、渡す引数とパイプからの読み取りが動くことです。うまくいかないときは、次の方法で先に WAV に変換してください。
+> 確認したのは、WSL で試験用の代役を使って、渡す引数とパイプからの読み取りが動くことです。うまくいかないときは、次の方法で先に WAV に変換してください。
 
 ### 自分で WAV に変換する
 
@@ -139,8 +137,9 @@ ffmpeg -i IMG_3183.MOV -vn -c:a pcm_s16le IMG_3183.wav
 コマンドライン版は次の順に確かめます。
 
 ```sh
-beepdump --version          # beepdump 0.2.0 のように出る
+beepdump --version          # beepdump 0.3.0 のように出る
 beepdump listing --basic    # 打ち込むリストが出る
+beepdump listing --csave    # CSAVE M の命令が出る
 beepdump decode -o test.rom 録音.wav    # test.rom が既にあれば --force が必要
 ```
 
@@ -148,7 +147,7 @@ beepdump decode -o test.rom 録音.wav    # test.rom が既にあれば --force 
 
 ## ポケコン側の準備
 
-ポケコンにインストールするものはありません。[README](../README.md#1-プログラムを入れる) のとおりにプログラムを打ち込みます。CE-140F（またはその代わりになるもの）があれば、`BASIC/BEEPFAST.BAS` か `BASIC/BEEPDUMP.BAS` を SD カードなどにコピーして `LOAD` できます。
+ポケコンにインストールするものはありません。CSAVE M ならプログラムも要りません。機械語版と BASIC 版は、[README](../README.md#1-プログラムを入れる) のとおりにプログラムを打ち込みます。CE-140F（またはその代わりになるもの）があれば、`BASIC/BEEPFAST.BAS` か `BASIC/BEEPDUMP.BAS` を SD カードなどにコピーして `LOAD` できます。
 
 ## アンインストール
 

@@ -6,6 +6,8 @@
 
 See [README_en.md](../README_en.md) for how to use it. This file covers the sound formats, what has been verified, and how to build.
 
+There are three methods. The machine-code and BASIC versions are this project's programs, and their sound formats were designed here. CSAVE M is a command of the machine's own BASIC, and its sound format was worked out from the sound of real hardware and the emulator.
+
 ## Machine-code sound format
 
 [fast/beepfast.asm](../fast/beepfast.asm) (150 bytes) drives the buzzer directly.
@@ -107,14 +109,65 @@ The check is a sum, so these misreadings cannot be found by the check alone. Bot
 
 This does not remove errors completely. For certainty, use the machine-code version or two recordings. The machine-code version has a running sum, which also catches swaps.
 
+## CSAVE M sound format
+
+`CSAVE M "name",start,end` is a BASIC command that saves a range of memory to cassette. It is not in the manual. On real hardware it also sounds on the buzzer, so it plays the ROM with no program to type in. The name can be left out. The form `SAVE M "CAS:..."` gives `Bad drive name`.
+
+![There is a header section and a data section. Each has a carrier, a run of long cycles, a run of short cycles, one long cycle, and then bytes. The data section ends with a 2-byte check value](figures/tape_stream_en.svg)
+
+One cycle is one bit.
+
+![A byte is a long start cycle followed by the data, MSB first. A data 1 is a long cycle and a data 0 is a short cycle](figures/tape_frame_en.svg)
+
+### Timing
+
+These values were measured on real hardware in 48 kHz recordings. They vary a little by model and unit (1593 to 1616 bps for the main ROM on 5 real machines).
+
+| Part | Half period (samples) | Frequency |
+|---|---|---|
+| Carrier | About 8.04 | About 2986 Hz |
+| Data 1 | About 19.72 | About 1217 Hz |
+| Data 0 | About 7.89 | About 3041 Hz |
+| Gap between bytes | About 2.71 samples | |
+
+A byte's time depends only on its number of 1 bits. FFh takes 7.45 ms and 00h takes 3.51 ms. The 256KB main ROM took about 22 minutes, and the 128KB extension ROM, with many FFh bytes, about 16 minutes.
+
+### Header
+
+50 bytes.
+
+| Byte | Content |
+|---|---|
+| 0 | `01h` |
+| 1–16 | The name (padded with spaces) |
+| 17 | `0Dh` |
+| 18, 19, 29 | Length (low, middle, high) |
+| 20, 21, 30 | Start address (low, middle, high) |
+| 22, 23, 31 | Vary between real machines. `FFh` on the emulator |
+| 24–28, 32–48 | 0 |
+| 49 | The number of 1 bits in bytes 0 to 48 (low 8 bits) |
+
+### Data
+
+The data is followed by the number of 1 bits in all the data, in 2 bytes (high first). There are no addresses and no per-block checks.
+
+### Weakness of the check
+
+The check value is only the number of 1 bits, so a swap of neighboring bits cannot be found. This kind of misreading did occur on real recordings during development. So BeepDump shows every block read from one recording in yellow, and turns it green only when another recording agrees.
+
+### Reading
+
+See [ANALYSIS_en.md](ANALYSIS_en.md#9-reading-csave-m) for the details. The sound is treated as a sum of the buzzer's responses, and each byte is read by comparing it with 256 waveforms. The analysis patterns are not used.
+
 ## Multiple analysis patterns
 
-Recording devices capture sound differently, so there are 11 analyses that vary the channel, the high-pass frequency, level smoothing, the detection threshold, and the lookahead (`Analyzer.Patterns`).
+This applies to the machine-code and BASIC versions. Recording devices capture sound differently, so there are 11 analyses that vary the channel, the high-pass frequency, level smoothing, the detection threshold, and the lookahead (`Analyzer.Patterns`).
 
 - They run in order from "standard" and stop once everything is read.
 - From the second pattern on, the machine-code version only reads the blocks still missing, plus a few used for learning.
 - Three patterns in a row with no gain end the analysis, because a part ruined by noise will not be readable by another pattern.
 - A block that differs between patterns counts as not read. The patterns read the same audio, so agreement among more of them confirms nothing.
+- From the second pattern on, the machine-code version only reads the range of sound read first. Level smoothing makes the noise before and after the sound look like sound, and learning from that noise would read every block again and again.
 
 ## What has been verified
 
@@ -123,19 +176,31 @@ Recording devices capture sound differently, so there are 11 analyses that vary 
 | Version | Model | Recording | Result |
 |---|---|---|---|
 | Machine code | PC-E500 | All main ROM, 15.3 min, audio of an iPhone video | 1024 / 1024 blocks. Byte-exact with the ROM image at hand |
-| Machine code | PC-U6000 | All main ROM, 15.5 min, audio of an iPhone video | 1024 / 1024 blocks (10 repaired). No wrong data |
+| Machine code | PC-U6000 | All main ROM, 15.5 min, audio of an iPhone video | 1024 / 1024 blocks (13 repaired). No wrong data |
 | Machine code | PC-U6000 | All extension ROM, 8.1 min, audio of an iPhone video | 512 / 512 blocks. With the main ROM, 384KB byte-exact with the ROM image at hand |
 | BASIC | PC-E500 | Stopped at 30 min (73KB) | 276 of 286 blocks (9 repaired). No wrong data in what was read |
 
-The BASIC reading was tuned on this recording, so other recordings may not reach the same accuracy.
+The BASIC reading was tuned on this recording.
 
-Not verified on real hardware:
+CSAVE M results are below. All are the audio of iPhone videos, and the blocks read were compared with the ROM images at hand. **All 8 recordings had 0 bytes of wrong data.**
 
-- Running on a PC-E650, and the BASIC version on a PC-U6000
-- Adding retakes (only tested on synthetic sound; combining the PC-U6000's main and extension recordings was tested on real recordings)
-- Machine-code speeds other than a delay of 130
-- Stopping the machine code with the ON key
-- Reading phone voice memos (M4A)
+| Model | Range | Recording length | Blocks read | Not read |
+|---|---|---|---|---|
+| PC-E500 | Main | 22.2 min | 1024 / 1024 | 0 |
+| PC-E550 | Main | 22.1 min | 1024 / 1024 | 0 |
+| PC-1480U | Main | 22.4 min | 1024 / 1024 | 0 |
+| PC-E650 (1st take) | Main | 22.2 min | 1017 / 1024 | 7 |
+| PC-E650 (2nd take) | Main | 22.3 min | 1024 / 1024 | 0 |
+| PC-E650 | Extension, `30000` to `3FFFF` | 8.1 min | 256 / 256 | 0 |
+| PC-U6000 | Main | 22.2 min | 1020 / 1024 | 4 |
+| PC-U6000 | Whole extension | 16.1 min | 512 / 512 | 0 |
+
+- **PC-E650:** with the 3 recordings combined, the 320KB recorded matched the ROM image at hand byte for byte. `20000` to `2FFFF` was not recorded and is filled with `FFh` (the ROM image at hand is also all `FFh` there).
+- **Blocks not read:** all are at places with noise, and another recording fills them in.
+- **Check value:** the 2nd take on the PC-E650 reports "The overall check value does not match" although all its data is correct. Only the 2 bytes of the check value were misread.
+- **PC-E500:** combining a CSAVE M recording with a machine-code recording made all 1024 blocks agree and turn green, and byte-exact with the ROM image (checked on an earlier build during tuning).
+
+The CSAVE M reading was tuned on these recordings.
 
 ### Emulator
 
@@ -144,6 +209,7 @@ Not verified on real hardware:
 - **Machine code:** the 8 blocks from `FF000` to `FF7FF`. All matched the ROM, both decoding the sound directly and reading it with BeepDump.
 - **BASIC:** the 3 blocks from `FF000` to `FF2FF`. BeepDump read 2 or 3 blocks, with no errors.
 - **`BEEPDUMP.BAS`:** `LOAD`ed and run on a PC-E500 and a PC-U6000, with the same result as the BASIC version.
+- **CSAVE M:** for the main ROM of every ROM at hand and the extension ROMs of the PC-E650 and PC-U6000, the sound was turned back into bits and matched the ROM byte for byte. This checked the format, and did not go through BeepDump's reading.
 
 The emulator's timing differs from real hardware (see "Timing" above), so it says nothing about speed.
 
@@ -153,8 +219,9 @@ The emulator's timing differs from real hardware (see "Timing" above), so it say
 
 - Machine code: all blocks are read.
 - BASIC: wrong data is not accepted, and most blocks are read. The reading was made stricter to match real recordings, so some blocks may not be read from synthetic sound.
+- CSAVE M: no wrong data, and the data is read. The tests cover sampling rates, mono, clock differences, FFh runs, recordings that stop early, and more, and check that one recording never turns green.
 
-Two things are not covered by synthetic sound: long rings (learning does not work with the synthetic response) and bit repair (synthetic noise spreads errors too widely for repair to work). Both were verified on real recordings.
+Long rings (learning does not work with the synthetic response) and bit repair (synthetic noise spreads errors too widely for repair to work) were verified on real recordings.
 
 ## Building
 

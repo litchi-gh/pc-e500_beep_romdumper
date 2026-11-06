@@ -8,6 +8,12 @@ public sealed record RomModel(string Name, (int Start, int End)[] Ranges)
     public static readonly RomModel Main384 = new("PC-E650 / PC-U6000（拡張 128KB + 本体 256KB）", [(0x20000, 0x3FFFF), (0xC0000, 0xFFFFF)]) { EnglishName = "PC-E650 / PC-U6000 (extension 128KB + main 256KB)" };
     public static readonly RomModel[] All = [Main256, Main384];
     public int Size => Ranges.Sum(r => r.End - r.Start + 1);
+
+    /// <summary>範囲を録音する CSAVE M の命令。</summary>
+    public static string TapeCommand(int start, int end) => $"CSAVE M \"A\",&H{start:X5},&H{end:X5}";
+
+    /// <summary>この機種の ROM をすべて録音する CSAVE M の命令。</summary>
+    public string TapeListing => string.Join(Environment.NewLine, Ranges.Select(r => TapeCommand(r.Start, r.End)));
 }
 
 /// <summary>

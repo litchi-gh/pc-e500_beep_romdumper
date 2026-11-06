@@ -10,13 +10,15 @@ See [README_en.md](../README_en.md) for how to use it and [TECHNICAL_en.md](TECH
 
 ## Overview
 
-![The recording is loaded. For each analysis pattern it is preprocessed, divided, identified, and read. The results of the patterns and recordings are then combined into a ROM](figures/pipeline_en.svg)
+![The recording is loaded. A long carrier means it is read as CSAVE M. Otherwise, for each analysis pattern it is preprocessed, divided, identified, and read, and the patterns are combined. Both then combine the recordings into a ROM](figures/pipeline_en.svg)
 
 Three ideas run through the analysis.
 
 - **The check has the final say.** Any one clue may or may not be reliable in a given recording, so many ways of reading are tried and only results that pass the check are used. As long as the check stops errors, adding ways of reading does not make the data less correct.
 - **Learn from what was read.** The quirks of a model or a recording device (the buzzer's ring, BASIC's processing time) are not assumed. They are measured from blocks known to be correct.
 - **Report what could not be read.** Asking for another recording is better than putting wrong data in the ROM.
+
+CSAVE M has no check per block, so the first idea does not apply to it. Comparing with another recording takes its place ([section 9](#9-reading-csave-m)).
 
 ## 1. Loading the audio
 
@@ -70,11 +72,13 @@ This looks only at level, not pitch.
    - 4 times the lowest 0.2% of the envelope of the whole recording (to stay above the noise in silence)
 4. Short gaps are joined (under 4.5 ms for BASIC, 3.5 ms for machine code). BASIC also discards tones of 2.4 ms or less.
 
-## 4. Telling which version made the sound
+## 4. Telling which method made the sound
 
-`FastDecoder.LooksFast`
+`TapeDecoder.Looks`, `FastDecoder.LooksFast`
 
-Two or more bursts longer than 0.15 seconds mean machine code. A BASIC tone is well below that length.
+CSAVE M is checked first. The analysis looks for places where the same period repeats for at least 1.5 seconds (carriers). A pair close to 10000 and 11000 cycles (0.75 to 1.15 times) means CSAVE M. The analysis patterns are not used then, only the reading in [section 9](#9-reading-csave-m). A run of 00h also has many short cycles in a row, but its start bits break the period, so the strength of the repetition tells them apart (on real recordings at least 0.95 for carriers and at most 0.61 for 00h runs, with the threshold at 0.75).
+
+Otherwise it is machine code or BASIC. Two or more bursts longer than 0.15 seconds mean machine code. A BASIC tone is well below that length.
 
 Bursts quieter than 1/4 of the typical (median) burst are excluded here. Room noise before and after the program can also look like a long sound, and could be mistaken for the learning sequence.
 
@@ -298,6 +302,8 @@ Replacing two or more tones is not tried, because on a real recording that accep
 - The BASIC version learns timing from all tones, so it reads everything each time. Once it has read any blocks, it only uses the patterns that change the channel or smooth the level (2, 3, and 4). A block read only by a non-standard pattern (5 to 9) does not turn green even if it passes the check.
 - Three patterns in a row with no gain end the analysis, because a part ruined by noise will not be readable by another pattern. While nothing has been read, every pattern is tried.
 
+From the second pattern on, the machine-code version only looks at the range of sound read first (plus 0.05 seconds on each side). Level smoothing makes the room noise before and after the sound look like bursts of sound. Learning from that noise reads nothing, so the reader learns again and reads every block again, repeatedly (13 minutes for this pattern alone on a real recording). Noise given an address also leaves a block that does not exist counted as not read, which sends the analysis on to the next pattern even with everything read. A run outside this range that the first pattern could not read at all is not read. It appears as a missing range.
+
 ## 8. Combining the recordings
 
 [RomImage.cs](../BeepDump/src/BeepDump.Core/RomImage.cs)
@@ -310,6 +316,94 @@ Replacing two or more tones is not tried, because on a real recording that accep
 | A held-back block is read again | The new content is used, and turns green, once it has appeared at least twice and more often than any other. A tie stays held back |
 
 A recording is counted only once. Files are compared by content, so a renamed copy is recognized. A converted copy cannot be recognized, and does not confirm anything.
+
+## 9. Reading CSAVE M
+
+[TapeDecoder.cs](../BeepDump/src/BeepDump.Core/TapeDecoder.cs)
+
+The sound format is in [TECHNICAL_en.md](TECHNICAL_en.md#csave-m-sound-format).
+
+![Find the carriers, learn from the start of the header and 3000 data bytes, and read the header. Then read all the data, drop bytes under loud noise, assign addresses, and compare with other recordings](figures/tape_pipeline_en.svg)
+
+### What makes it hard
+
+- **The check cannot confirm the data.** The only check is the number of 1 bits in all the data. When two neighboring bits swap, neither that count nor the time changes. The machine-code approach of searching for a reading that passes the check is not available, so reading relies only on how well the sound fits.
+- **There are no addresses or boundaries.** The time a byte takes depends on its value. One miscounted byte shifts the address of everything after it.
+- **Rings overlap the next bits.** The case rings for about 10 ms, far longer than a bit (0.33 to 0.82 ms).
+- **Runs of one value give few clues.** A run of FFh is just long cycles, and only a small gap marks the byte boundaries.
+
+So **every block read from one recording is yellow**, even when the overall check value matches. A block turns green only when another recording agrees ([section 8](#8-combining-the-recordings)).
+
+### 9.1 First learning
+
+1. The carrier's half period is measured accurately over an interval of 50 cycles. The bit lengths start from this half period, using ratios measured on real recordings (long cycle 2.4528 times, short cycle 0.98183 times, byte gap 0.3377 times).
+2. The position comes from fitting the sequence at the start of the header section. The response is then learned by assuming the start of the header without reading it: `01h`, a name (16 spaces), `0Dh`. Even with a name, most of it is spaces, which is enough to begin. Once the name is read, the response is learned again from the values read.
+
+The response is the waveform of the buzzer's rising and falling edges, found separately for each channel by least squares. The sound is treated as the sum of these.
+
+### 9.2 Relearning from the data
+
+3000 data bytes other than FFh are read, and the bit lengths and the response are found again. Learning while the time is off lets the response absorb the error, so the response is aligned so that its rise comes first.
+
+Reading half a cycle off gives a response with the rising and falling edges swapped, which is self-consistent but wrong. **The header's content can be checked, so the header decides.** If it cannot be read, the position shifts by 0, ±0.5, ±1, ±1.5, and ±2 carrier cycles, and the data is read again from the start.
+
+### 9.3 Reading the header
+
+With the learned response, the header is read at each starting position, one sample apart (±120 samples at 48 kHz).
+
+- Only readings whose fixed fields are right are used: the `0Dh` at byte 17, and the zeros at bytes 24 to 28 and 32 to 48. One wrong byte among the zeros is allowed.
+- Readings whose start address and length do not fit in memory are not used either, because a reading half a cycle off can get the fixed fields right by chance. If no reading is usable, the retry in 9.2 follows.
+- The start address and the length are decided by a vote. A reading whose header check value also matches counts as 3 votes.
+- The first byte is easily misread because of the ring of the sound before it, so it is fixed at `01h`.
+
+### 9.4 Reading byte by byte
+
+For each of the 256 values of a byte, a waveform is built from the response and compared with the recording, and the value that leaves the least sound is taken. The sound of each byte read is subtracted from the recording, so its ring is gone for the next byte.
+
+- The response is cut to 3 ms for speed. Times between samples are handled with 8 phases.
+- Both channels are used, weighted by their noise.
+- The timing error is measured and followed while reading.
+- The response is relearned every 1000 bytes. It is not used if its shape differs much from before (similarity under 0.9), because learning from runs of one value or from misread data ruins it.
+
+### 9.5 When reading gets lost
+
+Three bytes in a row that leave much sound (a remaining share above the larger of 0.8 and 1.6 times the typical value) mean the time has probably shifted through a misreading. The reader goes back 20 bytes and extends up to 64 candidate sequences in parallel, 30 bytes ahead.
+
+A byte's time depends only on its number of 1 bits. Sequences with the same number of bytes and the same number of 1 bits are at the same time, so only the best of those is kept (the Viterbi method). Sequences at different times never need comparing, and one with the wrong time stops fitting the sound that follows. If the remaining sound does not fall to 0.97 times or less, the original reading is restored.
+
+On real recordings, the time on each side of a disturbance was within one sample of the truth. Miscounts were rare, and what is lost is the values inside the disturbance.
+
+### 9.6 FFh runs
+
+Most of the extension ROM is FFh. An FFh byte always takes the same time, so counting by time is more reliable than reading the sound.
+
+- After 32 bytes of FFh, the reader changes its method. If noise spoils the fit, but the sound matches FFh again further on at the same period, the number of bytes up to there comes from the time.
+- After reading, clusters of other values between FFh runs are examined. If their time is a whole number of FFh periods (within 0.02) and FFh roughly explains the sound, they are taken as noise and replaced with FFh. Real data would not take a whole number of periods, or would not fit the shape.
+- When the data starts with FFh, boundaries shifted by whole cells sound almost the same, and the data that follows gets misread. The sound of 64 bytes is compared to fix the boundaries.
+
+### 9.7 Polishing
+
+After everything is read, a longer response of 10 ms is learned for each stretch of sound (every 8000 bytes), and the whole reading is checked again. Swapped bits that the short response barely tells apart differ clearly with the long one (more than 10 times on real recordings).
+
+- Swaps of neighboring bits are tried and kept if the remaining sound falls. Swaps across a byte boundary are tried too.
+- For bytes that leave especially much sound (over 1.3 times the usual), all values with the same number of 1 bits are tried.
+
+### 9.8 Dropping bytes under noise
+
+A byte is not trusted if its remaining sound is over 10 times the usual noise and also over 25% of the sound itself, and its block turns red. **On real recordings, inside a noise the misreading fitted the sound better than the truth did.** The information is gone from the sound, so no way of reading can fix it. Another recording fills it in.
+
+### 9.9 Assigning addresses
+
+Addresses count up from the start address in the header. If a disturbance changes the number of bytes, what follows is counted back from the end. Blocks whose address cannot be determined, because the bytes read do not match the header's length, count as not read. Bytes at the ends that do not fill 256 bytes are not used.
+
+The overall check value never changes a block's color. It only produces a message.
+
+- A match says nothing about swapped bits.
+- The check value itself can be misread. In one real recording with all the data correct, only the check value was misread (`C346` as `C941`). If the correct value would fit the sound about as well as the value read (the remaining sound within 1.03 times), it counts as matching. This example was 1.033 times, so it did not count.
+
+### What was tried and did not help
+
+Pre-emphasis, band-pass filters, whitening by linear prediction, high-frequency-only channels, a long response while reading, responses that depend on neighboring values, and cubic interpolation all made real recordings worse or barely changed them.
 
 ## Summary of protection against errors
 
@@ -324,9 +418,14 @@ A recording is counted only once. Files are compared by content, so a renamed co
 | Every tone off by one | How the scale is chosen, and the bias check | BASIC |
 | Canceling misreadings | Checking against duration and interval | BASIC |
 | Repair passing by accident | One tone only, and only if it is the sole candidate | BASIC |
-| Disagreement between patterns or recordings | Between patterns, the block counts as not read. Between recordings, it is held back until the new content leads | Both |
+| Disagreement between patterns or recordings | Between patterns, the block counts as not read. Between recordings, it is held back until the new content leads | Machine code, BASIC |
+| Trusting data that cannot be checked | One recording never turns a block green | CSAVE M |
+| Reading half a cycle off | Check the header's fixed fields, and retry at other positions | CSAVE M |
+| Misreading inside a noise | A block containing a byte that leaves much sound counts as not read | CSAVE M |
+| A miscount shifting addresses | Compare sequences by time and number of 1 bits. If the byte count differs from the header, the blocks count as not read | CSAVE M |
+| Disagreement between recordings | Held back until the new content leads | CSAVE M |
 
-**Weaknesses that remain:** the BASIC check is a sum, so a misreading might still get past all of these. For certainty, use the machine-code version or two recordings. On the machine-code version, an error that passes both the check and address continuity cannot be ruled out either, although none has occurred on real recordings so far.
+**Weaknesses that remain:** the BASIC check is a sum, so a misreading might still get past all of these. For certainty, use the machine-code version or two recordings. On the machine-code version, an error that passes both the check and address continuity cannot be ruled out either, although none has occurred on real recordings so far. CSAVE M has no way to confirm a single recording. If two recordings misread the same place in the same way, the error stays, in green.
 
 ## What each stage gained on real recordings
 
@@ -374,4 +473,6 @@ For certainty, use the machine-code version or two recordings.
 - A recorder's strong noise suppression can remove the buzzer's sound itself.
 - Recordings in strong noise (SNR 10 dB) or strong room reverberation cannot be read. Keep the phone close to the buzzer, in a quiet place.
 - Long rings and bit repair have only been verified on real recordings. The synthetic sound of the automated tests does not reproduce them.
-- The BASIC acceptance values were tuned on a single PC-E500 recording, so other models or recordings may not reach the same accuracy.
+- The BASIC acceptance values were tuned on a single PC-E500 recording.
+- The CSAVE M thresholds were also fitted to the few recordings at hand, and its bit-length ratios start from values measured on real recordings.
+- A CSAVE M block with noise in it cannot be fixed from one recording. Record it once more.

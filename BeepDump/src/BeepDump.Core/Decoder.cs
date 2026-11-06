@@ -4,7 +4,14 @@ public enum BlockState { Good, Repaired, Failed }
 
 public sealed record Block(int Address, BlockState State, byte[] Data);
 
-public sealed record DecodeResult(List<Block> Blocks, double Scale, double Overhead, int ToneCount, List<string> Notes);
+public sealed record DecodeResult(List<Block> Blocks, double Scale, double Overhead, int ToneCount, List<string> Notes)
+{
+    /// <summary>CSAVE M の音を読んだか。</summary>
+    public bool Tape { get; init; }
+
+    /// <summary>機械語版で読めた音のある範囲（サンプル）。次のパターンが録音の前後の雑音を読まないように使う。</summary>
+    public (int From, int To)? Sound { get; init; }
+}
 
 /// <summary>
 /// BEEPDUMP.TXT が鳴らす音を読む。音の並びは 1 ブロック 259 音:
@@ -32,9 +39,10 @@ public static class Decoder
 
     /// <param name="knownScale">同じ機械の前の録音で分かった周期の倍率（なければ 0）。音の種類が少ない短い録り直しでも倍率を間違えない</param>
     /// <param name="fast">機械語版か（分かっていれば）。指定がなければ音から判別する</param>
-    public static DecodeResult Decode(float[] x, int rate, Action<string, double>? progress = null, Action<string>? trace = null, double knownScale = 0, double relative = 0.12, int lookahead = 3, Func<int, bool>? wanted = null, bool? fast = null)
+    /// <param name="sound">機械語版で、この範囲（サンプル）の音だけを読む</param>
+    public static DecodeResult Decode(float[] x, int rate, Action<string, double>? progress = null, Action<string>? trace = null, double knownScale = 0, double relative = 0.12, int lookahead = 3, Func<int, bool>? wanted = null, bool? fast = null, (int From, int To)? sound = null)
     {
-        if (fast ?? FastDecoder.LooksFast(x, rate, relative)) return FastDecoder.Decode(x, rate, progress, relative, lookahead, wanted);
+        if (fast ?? FastDecoder.LooksFast(x, rate, relative)) return FastDecoder.Decode(x, rate, progress, relative, lookahead, wanted, sound);
         var notes = new List<string>();
         var tones = Segmenter.Find(x, rate, shortest: 0.0024, relative: relative);
         var blocks = new List<Block>();

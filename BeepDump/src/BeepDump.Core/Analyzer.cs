@@ -41,6 +41,8 @@ public static class Analyzer
 
     public static DecodeResult Analyze(PcmAudio audio, Action<string, double>? progress = null, Action<string>? trace = null, double knownScale = 0)
     {
+        // CSAVE M は音の形式が違い、パターンを変えて読む処理は当てはまらない
+        if (TryTape(audio, progress) is { } tape) return tape;
         var patterns = Patterns.Where(p => audio.Channels.Length >= 2 || p.Channel == ChannelMix.Both).ToArray();
         var votes = new Dictionary<int, List<Block>>();
         var failed = new HashSet<int>();
@@ -50,6 +52,7 @@ public static class Analyzer
         double scale = 0, overhead = 0;
         int tones = 0, number = 0, idle = 0;
         bool fast = false;
+        (int From, int To)? sound = null;     // 機械語版で読めた音の範囲。後のパターンはこの外の雑音を読まない
         Exception? error = null;
         foreach (var pattern in patterns)
         {
@@ -67,7 +70,7 @@ public static class Analyzer
                 if (votes.Count == 0) fast = FastDecoder.LooksFast(samples, audio.Rate, pattern.Relative);
                 // 機械語版は、ほかのパターンですでに読めたブロックを読まない（BASIC 版は全部の音から時間を学ぶので、全部読む）
                 result = Decoder.Decode(samples, audio.Rate, (text, f) => progress?.Invoke($"{text} ({index + 1}/{patterns.Length}: {pattern.Label})", (index + f) / patterns.Length),
-                    index == 0 ? trace : null, knownScale, pattern.Relative, pattern.Lookahead, votes.Count > 0 ? address => !votes.ContainsKey(address) : null, fast);
+                    index == 0 ? trace : null, knownScale, pattern.Relative, pattern.Lookahead, votes.Count > 0 ? address => !votes.ContainsKey(address) : null, fast, sound);
             }
             catch (Exception e)
             {
@@ -85,7 +88,7 @@ public static class Analyzer
                 if (!votes.TryGetValue(block.Address, out var list)) votes[block.Address] = list = [];
                 list.Add(risky && block.State == BlockState.Good ? block with { State = BlockState.Repaired } : block);
             }
-            if (votes.Count > before) used.Add($"{pattern.Label} {votes.Count - before}");
+            if (votes.Count > before) { used.Add($"{pattern.Label} {votes.Count - before}"); sound ??= result.Sound; }
             if (risky && votes.Count > before) notes.Add(Messages.Pick("BASIC 版を標準以外のパターンで読みました。誤りが通りやすいので、もう 1 回録音して確かめてください。", "The BASIC version was read with a non-standard pattern, where errors pass more easily. Record it again to confirm."));
             // 検査の通らなかった倍率は不確かなので、後のパターンの基準にしない
             if (result.Scale > 0 && result.Blocks.Any(b => b.State == BlockState.Good)) { if (scale == 0) scale = result.Scale; if (knownScale == 0) knownScale = result.Scale; overhead = result.Overhead; }
@@ -120,6 +123,10 @@ public static class Analyzer
         if (blocks.Count == 0) notes.Add(Messages.Pick("どのパターンでも読めませんでした。音量が小さいか、録音機材の雑音消し（ノイズ抑制）で音が消えているかもしれません。", "No pattern could read this recording. The level may be too low, or the recorder's noise suppression may have removed the tones."));
         return new(blocks, scale, overhead, tones, notes);
     }
+
+    /// <summary>CSAVE M の音なら読む。ヘッダと本体の搬送音がそろうのは CSAVE M だけなので、読めなくてもほかの方式には回さない（長い録音では何十分もかかる）。</summary>
+    public static DecodeResult? TryTape(PcmAudio audio, Action<string, double>? progress = null) =>
+        TapeDecoder.Looks(audio) ? TapeDecoder.Decode(audio, progress) : null;
 
     /// <summary>読めたブロックが抜けなく並び、読めなかったブロックが残っていなければ終わり。</summary>
     static bool Complete(Dictionary<int, List<Block>> votes, HashSet<int> failed)

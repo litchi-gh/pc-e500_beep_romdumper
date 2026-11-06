@@ -9,6 +9,8 @@ public static class FastDecoder
     const double BurstGap = 0.0035;     // 秒。ブロックの間の無音（実機で約 10 ms）を区切る
     const double LongBurst = 0.15;      // 秒。BASIC 版の音はこれより十分短い
     const double RunGap = 2.0;          // 秒。これより長い無音で別の実行とみなす（機械語を書き込むのに 2 秒より長くかかる）
+    const double SoundMargin = 0.05;    // 秒。読めた音の範囲の外も、これだけは読む
+    const int LastAddress = 0xFFFFF;
     const double ResponseLength = 0.006; // 秒。学習用の並びは短いので、長い応答は求められない
     const double LongResponse = 0.020;   // 秒。読めたブロックから求める。筐体の響きが長い機種がある（PC-U6000 は 6 ms でも大きく残る）
     const int HeadBytes = 3, CheckBytes = 6, BlockBytes = HeadBytes + Decoder.DataBytes + CheckBytes;
@@ -53,12 +55,24 @@ public static class FastDecoder
     }
 
     /// <param name="wanted">指定があれば、この番地のブロックだけ読む（学習に使うブロックは別に少し読む）</param>
-    public static DecodeResult Decode(float[] x, int rate, Action<string, double>? progress = null, double relative = 0.12, int lookahead = 3, Func<int, bool>? wanted = null)
+    /// <param name="sound">
+    /// 指定があれば、この範囲（サンプル）の音だけを読む。音量をならすと録音の前後の部屋の雑音まで大きくなり、音の塊に見える。
+    /// 雑音から学ぶと全部のブロックの読み直しを繰り返し、実機の録音で 13 分かかった。雑音に振った番地も、読めなかったブロックとして残ってしまう。
+    /// </param>
+    public static DecodeResult Decode(float[] x, int rate, Action<string, double>? progress = null, double relative = 0.12, int lookahead = 3, Func<int, bool>? wanted = null, (int From, int To)? sound = null)
     {
         var notes = new List<string>();
-        var bursts = LongBursts(x, rate, Segmenter.Find(x, rate, BurstGap, relative: relative));
+        var tones = Segmenter.Find(x, rate, BurstGap, relative: relative);
+        if (sound is var (soundFrom, soundTo))
+        {
+            // 塊の区切りはパターンで少し変わるので、少し広く見る。雑音が音につながることがあるので、はみ出した分は切る
+            int margin = (int)(SoundMargin * rate), low = soundFrom - margin, high = soundTo + margin;
+            tones = tones.Where(t => t.End > low && t.Start < high).Select(t => new Tone(Math.Max(t.Start, low), Math.Min(t.End, high))).ToList();
+        }
+        var bursts = LongBursts(x, rate, tones);
         var blocks = new List<Block>();
         double speed = 0;
+        (int From, int To)? read = null;
         Run? previous = null;
         int done = 0, from = 0;
         for (int i = 1; i <= bursts.Count; i++)
@@ -68,12 +82,13 @@ public static class FastDecoder
             var run = new Run(x, rate, lookahead, wanted, bursts.GetRange(from, count), notes, f => progress?.Invoke(Messages.Pick("音を読み取り中", "Reading tones"), (done + f * count) / bursts.Count));
             blocks.AddRange(run.Decode(previous));
             if (run.Speed > 0 && run.ReadAny) { speed = run.Speed; previous = run; }
+            if (run.ReadAny) read = (read?.From ?? bursts[from].Start, bursts[i - 1].End);
             done += count;
             from = i;
         }
         if (speed > 0) notes.Add(Messages.Pick($"機械語版、約 {speed:F0} bps", $"Machine-code version, about {speed:F0} bps"));
         if (blocks.Count == 0) notes.Add(Messages.Pick("機械語版の音の並びが読めませんでした。", "Could not read the machine-code tone sequence."));
-        return new(blocks, 0, 0, bursts.Count, notes);
+        return new(blocks, 0, 0, bursts.Count, notes) { Sound = read };
     }
 
     /// <summary>
@@ -232,9 +247,10 @@ public static class FastDecoder
                     for (int i = 0; i < blocks.Length; i++)
                     {
                         int near = known.MinBy(n => Math.Abs(n - i));
-                        int address = (addresses[near] + (i - near) * Decoder.DataBytes) & 0xFFFFF;
+                        int address = addresses[near] + (i - near) * Decoder.DataBytes;
+                        bool Wants(int a) => a >= 0 && a <= LastAddress && wanted(a);
                         // 塊が割れると番号が 1 つずれることがあるので、前後の番地も見る
-                        skip[i] = addresses[i] < 0 && !wanted(address) && !wanted((address + Decoder.DataBytes) & 0xFFFFF) && !wanted((address - Decoder.DataBytes) & 0xFFFFF);
+                        skip[i] = addresses[i] < 0 && !Wants(address) && !Wants(address + Decoder.DataBytes) && !Wants(address - Decoder.DataBytes);
                     }
             }
             int finished = 0;
@@ -300,7 +316,9 @@ public static class FastDecoder
             for (int i = 0; i < blocks.Length; i++)
             {
                 int near = Enumerable.Range(0, blocks.Length).Where(n => addresses[n] >= 0).OrderBy(n => Math.Abs(n - i)).DefaultIfEmpty(-1).First();
-                expected[i] = near < 0 ? -1 : (addresses[near] + (i - near) * Decoder.DataBytes) & 0xFFFFF;
+                // メモリの範囲の外には番地がない。読めたブロックの前後の雑音を、00000 などに回り込ませない
+                int guess = near < 0 ? -1 : addresses[near] + (i - near) * Decoder.DataBytes;
+                expected[i] = guess > LastAddress ? -1 : guess;
             }
             int[] failed = Enumerable.Range(0, blocks.Length).Where(i => addresses[i] < 0 && !skip[i] && expected[i] >= 0).ToArray();
             var repaired = new byte[blocks.Length][];

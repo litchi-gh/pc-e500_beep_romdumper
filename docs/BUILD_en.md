@@ -54,7 +54,7 @@ This needs an internet connection.
 .\build.cmd -TestOnly  # tests only
 ```
 
-The tests take a few minutes. `BeepDump.exe` cannot be updated while it is open, so close it first.
+The tests take about 10 minutes. `BeepDump.exe` cannot be updated while it is open, so close it first.
 
 ### Linux and macOS
 
@@ -75,7 +75,7 @@ Replace `linux-x64` in both places to match the machine.
 | macOS (Apple Silicon) | `osx-arm64` |
 | macOS (Intel) | `osx-x64` |
 
-> **Untested:** building on Linux and macOS has not been tried. What has been tested is building with `.\build.cmd -Cli` on Windows, and running the resulting `linux-x64` version on Ubuntu under WSL.
+> What has been tested is building with `.\build.cmd -Cli` on Windows, and running the resulting `linux-x64` version on Ubuntu under WSL.
 
 You can also run it directly, without publishing:
 
@@ -92,9 +92,9 @@ They go under `BeepDump/app/`. Each runs on its own, with no .NET installation.
 | `BeepDump.exe` | Windowed application (Windows) | About 50MB |
 | `cli/win-x64/beepdump.exe` | Command-line version (Windows) | About 36MB |
 | `cli/linux-x64/beepdump` | Command-line version (Linux x64) | About 38MB |
-| `cli/linux-arm64/beepdump` | Command-line version (Linux Arm64, untested) | About 36MB |
-| `cli/osx-x64/beepdump` | Command-line version (macOS Intel, untested) | About 37MB |
-| `cli/osx-arm64/beepdump` | Command-line version (macOS Apple Silicon, untested) | About 35MB |
+| `cli/linux-arm64/beepdump` | Command-line version (Linux Arm64) | About 36MB |
+| `cli/osx-x64/beepdump` | Command-line version (macOS Intel) | About 37MB |
+| `cli/osx-arm64/beepdump` | Command-line version (macOS Apple Silicon) | About 35MB |
 
 See [INSTALL_en.md](INSTALL_en.md) for where to put them.
 

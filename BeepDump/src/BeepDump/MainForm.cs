@@ -10,7 +10,7 @@ sealed class MainForm : Form
 
     readonly ComboBox language = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 90 };
     readonly ComboBox model = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 400 };
-    readonly ComboBox method = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 340 };
+    readonly ComboBox method = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 450 };
     readonly Label modelLabel = new() { AutoSize = true, Margin = new(3, 8, 3, 3) };
     readonly Label methodLabel = new() { AutoSize = true, Margin = new(3, 8, 3, 3) };
     readonly Label firstStep = Heading();
@@ -30,6 +30,9 @@ sealed class MainForm : Form
     double knownScale;
     bool running;
     bool updatingTexts;
+
+    const int TapeMethod = 2, SourceLines = 6, AnswerLines = 4;
+    bool UsesTape => method.SelectedIndex == TapeMethod;
 
     RomModel Model => RomModel.All[model.SelectedIndex];
 
@@ -51,21 +54,23 @@ sealed class MainForm : Form
             UpdateTexts();
         };
         foreach (var _ in RomModel.All) model.Items.Add("");
-        method.Items.AddRange(["", ""]);
+        method.Items.AddRange(["", "", ""]);
         model.SelectedIndex = 0;
         method.SelectedIndex = 1;   // おすすめの機械語版
 
         method.SelectedIndexChanged += (_, _) => { if (!updatingTexts) ShowSource(); };
-        model.SelectedIndexChanged += (_, _) => { if (!updatingTexts) UpdateState(); };
+        model.SelectedIndexChanged += (_, _) => { if (!updatingTexts) { ShowSource(); UpdateState(); } };
         clearButton.Click += (_, _) => { image = new(); added.Clear(); knownScale = 0; log.Clear(); UpdateState(); };
         addButton.Click += (_, _) => Browse();
         saveButton.Click += (_, _) => Save();
         map.Paint += (_, e) => PaintMap(e.Graphics);
         map.Resize += (_, _) => map.Invalidate();
 
+        // ボタンの方が背が高いので、欄を縦の中ほどにそろえる
+        model.Margin = new(3, 6, 3, 3);
         var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
-        top.Controls.AddRange([modelLabel, model, addButton, saveButton, clearButton, language, methodLabel, method]);
-        top.SetFlowBreak(language, true);
+        top.Controls.AddRange([modelLabel, model, addButton, saveButton, clearButton, methodLabel, method, language]);
+        top.SetFlowBreak(clearButton, true);
 
         // Dock.Top は後に足したものほど上に並ぶ
         Controls.Add(map);
@@ -91,6 +96,11 @@ sealed class MainForm : Form
     {
         float factor = DeviceDpi / 96f;
         if (factor != 1) Scale(new SizeF(factor, factor));
+        // 行の途中で切れないように、欄の高さは実際の行の高さから決める
+        int line = source.GetPositionFromCharIndex(source.GetFirstCharIndexFromLine(1)).Y - source.GetPositionFromCharIndex(0).Y;
+        int border = (int)(4 * factor);
+        source.Height = line * SourceLines + border;
+        answers.Height = line * AnswerLines + border;
         var area = Screen.PrimaryScreen?.WorkingArea ?? Rectangle.Empty;
         if (!area.IsEmpty) Size = new(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
     }
@@ -129,10 +139,7 @@ sealed class MainForm : Form
         for (int i = 0; i < RomModel.All.Length; i++) model.Items[i] = RomModel.All[i].Label;
         method.Items[0] = T("BASIC 版（打ち込み少、本体 256KB 約 2 時間）", "BASIC (short to type, 256KB in about 2 hours)");
         method.Items[1] = T("機械語版（おすすめ。本体 256KB 約 15 分）", "Machine code (recommended, 256KB in about 15 min)");
-        secondStep.Text = T("2. RUN すると ? が 2 回出ます。次の開始番地・終了番地を順に答えます（&H も打ちます）。ENTER の前に録音を始めます。",
-            "2. RUN asks ? twice. Answer the start and end addresses below (type the &H too). Start recording before pressing ENTER.");
-        thirdStep.Text = T("3. 読み取り結果（緑=読めた  黄=修復して読めた  赤=読めなかった  灰=未録音）",
-            "3. Result (green = read, yellow = repaired, red = not read, gray = not recorded)");
+        method.Items[2] = T("CSAVE M（打ち込みは 1 行。本体 256KB 約 22 分、2 回録音で確認）", "CSAVE M (one line to type, 256KB in about 22 min, record twice)");
         updatingTexts = false;
         ShowSource();
         UpdateState();
@@ -141,6 +148,23 @@ sealed class MainForm : Form
     void ShowSource()
     {
         bool fast = method.SelectedIndex == 1;
+        thirdStep.Text = UsesTape
+            ? T("3. 読み取り結果（緑=2 回の録音が一致  黄=読めたが 1 回だけで未確認  赤=読めなかった  灰=未録音）",
+                "3. Result (green = two recordings agree, yellow = read once, not confirmed, red = not read, gray = not recorded)")
+            : T("3. 読み取り結果（緑=読めた  黄=修復して読めた  赤=読めなかった  灰=未録音）",
+                "3. Result (green = read, yellow = repaired, red = not read, gray = not recorded)");
+        secondStep.Text = UsesTape
+            ? T("2. 次の命令を打ちます。ENTER の前に録音を始め、音が止まって > が出るまで待ちます（本体 256KB で約 22 分）。", "2. Type the command below. Start recording before pressing ENTER, and wait for the sound to stop and > to appear (about 22 min for 256KB).")
+            : T("2. RUN すると ? が 2 回出ます。次の開始番地・終了番地を順に答えます（&H も打ちます）。ENTER の前に録音を始めます。",
+                "2. RUN asks ? twice. Answer the start and end addresses below (type the &H too). Start recording before pressing ENTER.");
+        UpdateAnswers();
+        if (UsesTape)
+        {
+            source.Text = Model.TapeListing;
+            firstStep.Text = T("1. プログラムは要りません。BASIC の RUN モードにします。読み違いに気づけるように、同じ範囲を 2 回録音します。",
+                "1. No program is needed. Go to BASIC RUN mode. Record each range twice, so that misreads can be found.");
+            return;
+        }
         source.Text = fast ? FastCode.MachineListing : FastCode.BasicListing;
         firstStep.Text = fast
             ? T("1. 1 行目（行番号なし）を最初に 1 回だけ実行すると、メニューに戻ります。BASIC キーで PRO モードに入り、残りの行を打ち込みます。",
@@ -182,11 +206,14 @@ sealed class MainForm : Form
                     var audio = AudioFile.Load(path, v => report.Report((loading, v)));
                     return Analyzer.Analyze(audio, (text, v) => report.Report((text, v)), null, knownScale);
                 });
+                if (result.Tape && !UsesTape) method.SelectedIndex = TapeMethod;   // CSAVE M の録音なら、足りない所も CSAVE M で録音できるように
                 if (result.Blocks.Any(b => b.State != BlockState.Failed)) added.Add(key);     // 読めたものだけ覚える。読めなかったファイルはもう一度試せる
                 image.Add(result.Blocks);
                 if (result.Scale > 0 && result.Blocks.Any(b => b.State == BlockState.Good)) knownScale = result.Scale;
                 int repaired = result.Blocks.Count(b => b.State == BlockState.Repaired), failed = result.Blocks.Count(b => b.State == BlockState.Failed), good = result.Blocks.Count - repaired - failed;
-                Log(T($"{name}: {good} ブロック読めた、修復 {repaired}、失敗 {failed}", $"{name}: {good} blocks read, {repaired} repaired, {failed} failed"));
+                Log(result.Tape
+                    ? T($"{name}: {repaired} ブロック読めた（未確認）、失敗 {failed}", $"{name}: {repaired} blocks read (not confirmed), {failed} failed")
+                    : T($"{name}: {good} ブロック読めた、修復 {repaired}、失敗 {failed}", $"{name}: {good} blocks read, {repaired} repaired, {failed} failed"));
                 foreach (var note in result.Notes) Log("  " + note);
             }
             // 並列処理の例外は包まれて届く。1 本で失敗しても、読めたブロックを失わないように続ける
@@ -211,12 +238,7 @@ sealed class MainForm : Form
     void UpdateState()
     {
         var missing = image.Missing(Model);
-        var unsure = image.Unsure(Model);
-        answers.Text = missing.Count > 0
-            ? string.Join(Environment.NewLine, RomImage.ForRetake(missing, Model).Select(m => $"&H{m.Start:X5}   &H{m.End:X5}"))
-            : unsure.Count == 0
-                ? T("すべて読めました。", "Every block was read.")
-                : T("すべて読めました。黄色のマスを確かめるなら、次の範囲をもう 1 回録音します:", "Every block was read. To confirm the yellow cells, record these ranges once more:") + Environment.NewLine + string.Join(Environment.NewLine, RomImage.ForRetake(unsure, Model).Select(m => $"&H{m.Start:X5}   &H{m.End:X5}"));
+        UpdateAnswers();
         saveButton.Enabled = !running && image.Blocks.Any(b => Model.Ranges.Any(r => b.Address >= r.Start && b.Address <= r.End));
         if (!running)
         {
@@ -228,14 +250,30 @@ sealed class MainForm : Form
                     "Drop recordings (MOV / MP4 / M4A / WAV) here. You can add several; they fill each other's gaps.")
                 : missing.Count == 0
                     ? T($"完了: 全 {total} ブロックを読みました（黄 {yellow}）。「ROM を保存」で保存できます。", $"Done: all {total} blocks were read ({yellow} yellow). Use Save ROM to save it.")
-                    : T($"{have} / {total} ブロックを読みました。残りを録音してドロップすると、そこだけ埋まります（番地は上の 2 に出ています）。",
-                        $"{have} of {total} blocks were read. Record the rest and drop it to fill the gaps (addresses are in step 2).");
+                    : UsesTape
+                        ? T($"{have} / {total} ブロックを読みました。残りを録音してドロップすると、そこだけ埋まります（命令は上の 2 に出ています）。",
+                            $"{have} of {total} blocks were read. Record the rest and drop it to fill the gaps (the commands are in step 2).")
+                        : T($"{have} / {total} ブロックを読みました。残りを録音してドロップすると、そこだけ埋まります（番地は上の 2 に出ています）。",
+                            $"{have} of {total} blocks were read. Record the rest and drop it to fill the gaps (addresses are in step 2).");
         }
         foreach (int a in image.Conflicts)
             Log(T($"注意: {a:X5} のブロックは録音によって内容が違いました。もう 1 回録音すると、同じ内容がそろった方を採ります。",
                   $"Note: block {a:X5} differed between recordings. Record it once more; the content that agrees is used."));
         image.Conflicts.Clear();
         map.Invalidate();
+    }
+
+    /// <summary>まだ録音が要る範囲を、選んだ方式の書き方で出す。</summary>
+    void UpdateAnswers()
+    {
+        var missing = image.Missing(Model);
+        var unsure = image.Unsure(Model);
+        string Lines(List<(int Start, int End)> ranges) => string.Join(Environment.NewLine, RomImage.ForRetake(ranges, Model).Select(m => UsesTape ? RomModel.TapeCommand(m.Start, m.End) : $"&H{m.Start:X5}   &H{m.End:X5}"));
+        answers.Text = missing.Count > 0
+            ? Lines(missing)
+            : unsure.Count == 0
+                ? T("すべて読めました。", "Every block was read.")
+                : T("すべて読めました。黄色のマスを確かめるなら、次の範囲をもう 1 回録音します:", "Every block was read. To confirm the yellow cells, record these ranges once more:") + Environment.NewLine + Lines(unsure);
     }
 
     void Save()
@@ -259,7 +297,8 @@ sealed class MainForm : Form
     void PaintMap(Graphics g)
     {
         g.Clear(map.BackColor);
-        const int Margin = 4, LabelHeight = 20, Spacing = 6;
+        float factor = DeviceDpi / 96f;
+        int Margin = (int)(4 * factor), Spacing = (int)(6 * factor), LabelHeight = Font.Height + (int)(2 * factor);
         int width = map.ClientSize.Width - 2 * Margin, height = map.ClientSize.Height - 2 * Margin;
         int Blocks((int Start, int End) range) => (range.End - range.Start + 1) / Decoder.DataBytes;
         int cell = 2;

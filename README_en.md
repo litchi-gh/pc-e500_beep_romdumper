@@ -2,19 +2,18 @@
 
 [日本語](README.md)
 
-ROMDump copies the built-in ROM of a Sharp PC-E500 series pocket computer to a PC with no peripherals. You type a short program into the pocket computer, which plays the ROM through its buzzer. A phone records it, and a PC application turns the recording back into a ROM file.
+ROMDump copies the built-in ROM of a Sharp PC-E500 series pocket computer to a PC with no peripherals. You type one command or a short program into the pocket computer, which plays the ROM through its buzzer. A phone records it, and a PC application turns the recording back into a ROM file.
 
-![Type in the program, RUN it to play the ROM on the buzzer, record with a phone, read it with BeepDump, and get a ROM file](docs/figures/overview_en.svg)
+![Type in a command, play the ROM on the buzzer, record with a phone, read it with BeepDump, and get a ROM file](docs/figures/overview_en.svg)
 
 ## This is an experimental application
 
 **This is an experimental application and has not been sufficiently verified.** Use it at your own risk. There is no guarantee that it works.
 
-- **Very little has been tested on real hardware.** The machine-code version was run on one PC-E500 and one PC-U6000, reading one recording of each range. The results matched the ROM images at hand byte for byte (384KB on the PC-U6000). The BASIC version has only been run part of the way, on a PC-E500. Other models, such as the PC-E650, have not been run on real hardware.
+- **Very little has been tested on real hardware.** The machine-code version was run on one PC-E500 and one PC-U6000, reading one recording of each range. The results matched the ROM images at hand byte for byte (384KB on the PC-U6000). CSAVE M was read on one each of the PC-E500, PC-E550, PC-1480U, PC-E650, and PC-U6000, with no errors in the blocks read ([results](docs/TECHNICAL_en.md#real-hardware)). The BASIC version has only been run part of the way, on a PC-E500.
 - **The only recording device tested is iPhone video.** Other devices have only been tried by processing a recording. The reading was also tuned on these few recordings.
-- **Data that reads successfully is not guaranteed to be correct.** Only the check values can confirm it. With nothing to compare against, a remaining error would go unnoticed. During development, wrong data did pass the check on the BASIC version. That was addressed, but it cannot be said to be gone. For certainty, use the machine-code version, and record twice to confirm the two agree.
+- **Data that reads successfully is not guaranteed to be correct.** Only the check values can confirm it. With nothing to compare against, a remaining error would go unnoticed. During development, wrong data did pass the check on the BASIC version. That was addressed, but it cannot be said to be gone. For certainty, use the machine-code version, and record twice to confirm the two agree. CSAVE M has no check per block, so always record it twice.
 - **Back up anything important first.** If a typing mistake slips through, the machine-code version can crash the machine and need a reset. It plays for a long time, so use fresh batteries.
-- **Some environments have not been run.** The macOS version, the Linux Arm64 version, and reading through the real ffmpeg are untested (see the [installation guide](docs/INSTALL_en.md)).
 
 If something does not work, or you confirm something new, please tell us in [Issues](https://github.com/litchi-gh/pc-e500_beep_romdumper/issues).
 
@@ -24,29 +23,29 @@ If something does not work, or you confirm something new, please tell us in [Iss
 
 | Model | ROM read | Saved file | On real hardware |
 |---|---|---|---|
-| PC-E500 | Main | 256KB | Machine code in full, BASIC part of the way |
-| PC-E500PJ | Main | 256KB | None |
-| PC-1480U | Main | 256KB | None |
-| PC-1490UII | Main | 256KB | None |
-| PC-E550 | Main | 256KB | None |
-| PC-E650 | Main + extension | 384KB | None |
-| PC-U6000 | Main + extension | 384KB | Machine code in full |
+| PC-E500 | Main | 256KB | Machine code and CSAVE M in full, BASIC part of the way |
+| PC-E500PJ | Main | 256KB | — |
+| PC-1480U | Main | 256KB | CSAVE M in full |
+| PC-1490UII | Main | 256KB | — |
+| PC-E550 | Main | 256KB | CSAVE M in full |
+| PC-E650 | Main + extension | 384KB | CSAVE M, main and `30000` to `3FFFF` |
+| PC-U6000 | Main + extension | 384KB | Machine code and CSAVE M in full |
 
-- **Checked on the emulator:** both programs were run on all 7 of these models, and the resulting sound was read with BeepDump and compared with the ROM. All 8 blocks tried on the machine-code version matched, and the blocks read on the BASIC version had no errors (with 32KB and 64KB of RAM; 64KB only on the PC-E650 and PC-U6000). Only part of the end of each ROM was tried, and the emulator's timing differs from real hardware.
-- **Other models:** they may work, but have not been checked.
+- **Checked on the emulator:** the machine-code and BASIC versions were run on all 7 of these models, and the resulting sound was read with BeepDump and compared with the ROM. All 8 blocks tried on the machine-code version matched, and the blocks read on the BASIC version had no errors (with 32KB and 64KB of RAM; 64KB only on the PC-E650 and PC-U6000). Only part of the end of each ROM was tried, and the emulator's timing differs from real hardware. For CSAVE M, the sound of the whole ROM on all 7 models was turned back into bits and matched the ROM.
 
-## Which version to use
+## Which method to use
 
-**The machine-code version is recommended.** There are two programs, and the application detects which one it is hearing.
+**CSAVE M is recommended if you want to avoid typing, and the machine-code version if you want it done quickly.** There are three methods, and the application detects which one it is hearing.
 
-| | Machine code (recommended) | BASIC |
-|---|---|---|
-| Typing | 21 lines, about 900 characters | 2 lines, about 190 characters |
-| Time for the 256KB main ROM | **15.3 minutes** (measured) | About 1.9 hours (estimated from a partial run) |
-| Read from one recording (real hardware) | **Everything** (PC-E500, PC-U6000) | About 96% (record the rest again) |
-| If you mistype | Usually `NG` on `RUN`. A mistake that slips through can crash the machine and need a reset | Stops with an error, or plays unreadable sound |
+| | CSAVE M | Machine code | BASIC |
+|---|---|---|---|
+| Typing | **1 line**, about 30 characters (no program) | 21 lines, about 900 characters | 2 lines, about 190 characters |
+| Time for the 256KB main ROM | About 22 minutes (measured), twice | **15.3 minutes** (measured) | About 1.9 hours (estimated from a partial run) |
+| Read from one recording (real hardware) | 99.3 to 100% (the second recording fills in the rest) | **Everything** (PC-E500, PC-U6000) | About 96% (record the rest again) |
+| How the data is confirmed | **Comparing two recordings** (no check per block) | A check per block | A check per block (a sum, so weak) |
+| If you mistype | No machine code runs, so it cannot crash | Usually `NG` on `RUN`. A mistake that slips through can crash the machine and need a reset | Stops with an error, or plays unreadable sound |
 
-![Time for the 256KB main ROM: 15.3 minutes for machine code, about 1.9 hours for BASIC](docs/figures/time_compare_en.svg)
+![Time to record the 256KB main ROM once: 15.3 minutes for machine code, about 22 minutes for CSAVE M, about 1.9 hours for BASIC](docs/figures/time_compare_en.svg)
 
 ## What you need
 
@@ -68,11 +67,11 @@ See the [installation guide](docs/INSTALL_en.md) for how to get the application,
 | Recordings it can read | MOV, MP4, M4A, WAV, and others that Windows Media Foundation can read | WAV on any OS. Others work directly on Windows and need `ffmpeg` on Linux and macOS |
 | Tested on | Windows 11 Pro | Windows 11 Pro, Linux (Ubuntu 26.04 on WSL, x64) |
 
-- **Not run:** the macOS and Linux Arm64 versions have been built but not run. The OS list above comes from the [.NET 10 supported OS list](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md). Linux needs glibc 2.27 or later, and there is no build for Alpine (musl).
-- **Windows 10:** .NET 10 supports only the LTSC and Enterprise editions, and it is untested here.
-- **Windows N editions:** these lack Media Foundation, so reading MOV and similar formats needs the Media Feature Pack (untested). WAV works as it is.
-- **Memory:** about 2GB for a 15-minute recording, and more for longer ones. A recording of the full main ROM on the BASIC version (about 1.9 hours) is untested.
-- **Analysis time:** on a Core i5-1235U (10 cores) with 16GB of memory, about 20 seconds for a clean 15-minute recording and a few minutes for a hard one. It uses all CPU cores.
+- **OS:** the OS list above comes from the [.NET 10 supported OS list](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md). Linux needs glibc 2.27 or later, and there is no build for Alpine (musl).
+- **Windows 10:** .NET 10 supports only the LTSC and Enterprise editions.
+- **Windows N editions:** these lack Media Foundation, so reading MOV and similar formats needs the Media Feature Pack. WAV works as it is.
+- **Memory:** about 2GB for a 15-minute recording and about 2.8GB for a 22-minute CSAVE M recording, and more for longer ones.
+- **Analysis time:** on a Core i5-1235U (10 cores) with 16GB of memory, 15 to 30 seconds for a clean 15-minute machine-code recording and about 3 minutes for a hard one. A 22-minute CSAVE M recording also takes about 3 minutes. It uses all CPU cores.
 
 ### Pocket computer
 
@@ -80,18 +79,20 @@ See [Supported models](#supported-models). No peripherals are needed. It plays f
 
 ### Recording device
 
-A phone or anything else that can save one of the formats above. Tested with iPhone video (48 kHz, stereo). Voice memos (M4A) are untested.
+A phone or anything else that can save one of the formats above. Tested with iPhone video (48 kHz, stereo).
 
 ## Steps
 
 ### 1. Enter the program
 
-There are also images of the listings wrapped to the machine's 40-column screen, which are easier to type from. Do not press ENTER at a wrap.
+**CSAVE M needs no program.** Go to RUN mode in BASIC, and continue with [2. Record](#2-record).
+
+The machine-code and BASIC versions need the programs below. There are also images of the listings wrapped to the machine's 40-column screen, which are easier to type from. Do not press ENTER at a wrap.
 
 - Machine code: [BEEPFAST.png](BASIC/BEEPFAST.png)
 - BASIC: [BEEPDUMP.png](BASIC/BEEPDUMP.png)
 
-#### Machine-code version (recommended)
+#### Machine-code version
 
 1. Start BASIC and run this command as it is, with no line number. It reserves memory for the machine code and only needs to be run once. It returns you to the menu.
 
@@ -146,13 +147,33 @@ Enter BASIC, switch to PRO mode, type in this listing, and return to RUN mode. W
 
 Video works too. Only the audio is used, so the picture does not matter.
 
+Put the phone near the buzzer, in a quiet room, and try not to move it. A fairly quiet recording is fine: a PC-U6000 recording at about 1/7 of the PC-E500's level was read completely.
+
+<img src="docs/figures/IMG_0002.jpg" alt="A phone placed next to the pocket computer, recording" width="423">
+
+#### CSAVE M
+
+![In RUN mode in BASIC, type the command, start recording, then press ENTER. When the sound ends and > appears, stop recording. Then do it all once more](docs/figures/tape_steps_en.svg)
+
+1. In RUN mode in BASIC, type one of these commands. **Start recording before you press ENTER.**
+
+   | Range | Command | Time |
+   |---|---|---|
+   | Main ROM (all models) | `CSAVE M "A",&HC0000,&HFFFFF` | About 22 min |
+   | Extension ROM (PC-E650 / PC-U6000), the part with data | `CSAVE M "A",&H30000,&H33FFF` | About 1.5 min (calculated) |
+   | Whole extension ROM | `CSAVE M "A",&H20000,&H3FFFF` | About 16 min |
+
+2. Wait for the sound to finish. **Do not touch the keys while it plays.** A steady tone plays twice, for about 7 seconds in all, before the sound of the data starts.
+3. When it finishes, `>` appears. Stop recording.
+4. **Record the same thing once more.** CSAVE M has no check per block, so misreads only show up by comparing two recordings.
+
+A partial recording can still be read (tested on synthetic sound).
+
+#### Machine-code and BASIC versions
+
 ![RUN, answer the first prompt, answer the second, start recording, then press ENTER. When the sound ends and > appears, stop recording](docs/figures/recording_steps_en.svg)
 
-1. Put the phone near the buzzer, in a quiet room, and try not to move it. A fairly quiet recording is fine: a PC-U6000 recording at about 1/7 of the PC-E500's level was read completely.
-
-   <img src="docs/figures/IMG_0002.jpg" alt="A phone placed next to the pocket computer, recording" width="423">
-
-2. Type `RUN`. It asks `?` twice. Answer with these addresses, including the `&H`. **Start recording before you press ENTER the second time.**
+1. Type `RUN`. It asks `?` twice. Answer with these addresses, including the `&H`. **Start recording before you press ENTER the second time.**
 
    | Range | First `?` | Second `?` | Machine code | BASIC |
    |---|---|---|---|---|
@@ -160,8 +181,8 @@ Video works too. Only the audio is used, so the picture does not matter.
    | Extension ROM (PC-E650 / PC-U6000), the part with data | `&H30000` | `&H33FFF` | About 1 min | About 8 min |
    | Whole extension ROM | `&H20000` | `&H3FFFF` | About 8 min | About 1.7 hours |
 
-3. Wait for the sound to finish. **Do not touch the keys while it plays.** The machine-code version takes a moment before the sound starts.
-4. When it finishes, `>` appears. Stop recording.
+2. Wait for the sound to finish. **Do not touch the keys while it plays.** The machine-code version takes a moment before the sound starts.
+3. When it finishes, `>` appears. Stop recording.
 
 To stop early, hold the ON key until the sound stops (about a second on the machine-code version). A partial recording can still be read.
 
@@ -169,22 +190,26 @@ For a first try, a short range such as `&HC0000` and `&HC0FFF` is a good idea (a
 
 ### 3. Turn the recording into a ROM
 
-1. Start `BeepDump.exe` and choose the model at the top. The selector below the model switches between Japanese and English.
-2. Drop the recording (MOV / MP4 / M4A / WAV) on the window. The picture in a video is not used, so a black video is fine.
-3. When reading finishes, a grid shows the result for each block. This takes from tens of seconds to a few minutes. Harder recordings take longer, because more analysis methods are tried.
+1. Start `BeepDump.exe` and choose the model at the top. Choosing a method under Program shows what to type and the steps. The selector to its right switches between Japanese and English.
+2. Drop the recording (MOV / MP4 / M4A / WAV) on the window. The picture in a video is not used, so a black video is fine. Reading a CSAVE M recording switches Program to CSAVE M automatically.
+3. When reading finishes, a grid shows the result for each block. This takes from tens of seconds to a few minutes. On the machine-code and BASIC versions, harder recordings take longer, because more analysis methods are tried.
 
-   | Color | Meaning |
-   |---|---|
-   | Green | Read |
-   | Yellow | Read after correcting a small misreading, or the address could not be confirmed (it passes the check) |
-   | Red | Not read, or recordings disagree about its content |
-   | Gray | Not recorded yet |
+   | Color | Machine code, BASIC | CSAVE M |
+   |---|---|---|
+   | Green | Read | Two recordings agree |
+   | Yellow | Read after correcting a small misreading, or the address could not be confirmed (it passes the check) | Read, but only once, so not confirmed |
+   | Red | Not read, or recordings disagree about its content | The same |
+   | Gray | Not recorded yet | The same |
 
    ![The BeepDump window after reading the PC-U6000 main ROM. Yellow cells show among the green, the unrecorded extension ROM is gray, and the missing addresses are listed](docs/figures/app_window_en.png)
 
-   This is the window after reading a real recording of the PC-U6000 main ROM. The extension ROM has not been recorded yet, so it is gray, and its addresses appear in step 2.
+   This is the window after reading a real machine-code recording of the PC-U6000 main ROM. The extension ROM has not been recorded yet, so it is gray, and its addresses appear in step 2.
 
    Yellow cells pass the check, but are less certain than green. For certainty, record the ranges shown in step 2 once more. If the content is the same, they turn green (adding the same recording again, as a copy, or converted, does not confirm anything). See [ANALYSIS_en.md](docs/ANALYSIS_en.md#58-repairing-bits) for how repair works.
+
+   ![The BeepDump window after reading three CSAVE M recordings of a PC-E650. Most of the main ROM is green, some of it and everything from 30000 on is yellow, and the unrecorded 20000 to 2FFFF is gray](docs/figures/app_window_tape_en.png)
+
+   This is the window after reading three real CSAVE M recordings of a PC-E650 (the main ROM twice, and `30000` to `3FFFF` of the extension once). In the main ROM, what both recordings read is green. The 7 blocks that were red the first time and the extension, recorded only once, are yellow.
 
 4. When everything is there, press Save ROM.
 
@@ -205,7 +230,11 @@ You can also record everything again. If the noises fall in different places, tw
 
 A block that differs between recordings turns red. Record it once more, and the content that agrees is used.
 
-If you save with blocks missing, those blocks are filled with `FFh` (you are asked to confirm). This is what you do if you recorded only the part of the extension ROM with data. That the rest really is `FFh` has not been verified on versions other than the ROMs at hand.
+**On CSAVE M, recording everything again is recommended.** A full second recording both checks for misreads and fills the red cells. On a real PC-E650, this filled the 7 blocks that were red the first time. Commands for narrower ranges appear in step 2.
+
+![The PC-E650 main ROM. The first recording is all yellow with 7 red places, and the second is all yellow. Combined, most of it turns green, and the 7 places that were red are yellow](docs/figures/tape_retake_en.svg)
+
+If you save with blocks missing, those blocks are filled with `FFh` (you are asked to confirm). This is what you do if you recorded only the part of the extension ROM with data. In the ROM images at hand, the rest is all `FFh`.
 
 ## Troubleshooting
 
@@ -219,6 +248,9 @@ If you save with blocks missing, those blocks are filled with `FFh` (you are ask
 | The application says no tones were found, or could not read the recording | The recording is too quiet or has loud noise. Move the phone closer and record again |
 | Many red cells (the BASIC version leaves a few per recording) | Record the missing part again and add it. Avoid noises and talking |
 | Green, but you want to be sure | Record twice and drop both. Any disagreement turns red |
+| "Could not read the CSAVE M header" | The start of the recording is cut off. Start recording before you press ENTER |
+| "The overall check value does not match" (CSAVE M) | Either the data or the check value was misread. On one real recording all the data was correct and only the check value was misread. Record once more to compare |
+| CSAVE M is all yellow | That is normal. Record once more, and what agrees turns green |
 
 ## Command-line version
 
@@ -227,6 +259,7 @@ If you save with blocks missing, those blocks are filled with `FFh` (you are ask
 ```text
 beepdump decode -m e650 -o PC-U6000.rom IMG_3183.MOV IMG_3184.MOV
 beepdump listing            # print the listing to type in (--basic for BASIC)
+beepdump listing --csave -m e650    # print the CSAVE M commands
 beepdump --help
 ```
 
@@ -236,7 +269,7 @@ beepdump --help
 - The exit code is 0 if everything was read, 1 if some is missing (the ROM is still written, with `FFh` there), and 2 on an error.
 - WAV can be read on any OS. MOV and other formats work directly on Windows, and need [ffmpeg](docs/INSTALL_en.md#ffmpeg) on Linux and Mac.
 
-It has been run on Windows and on Linux (Ubuntu on WSL, x64). **The Mac version builds, but it has not been run.** If it will not start on Apple Silicon, try `codesign --sign - beepdump`.
+It has been run on Windows and on Linux (Ubuntu on WSL, x64). If the Mac version will not start on Apple Silicon, try `codesign --sign - beepdump`.
 
 ## More detail
 

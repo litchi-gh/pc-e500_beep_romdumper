@@ -429,6 +429,52 @@ Test("fast: a long loud noise does not lose the blocks after it", () =>
         if (!b.Data.SequenceEqual(fastRom.AsSpan(b.Address - Start, 256).ToArray())) return $"wrong data at {b.Address:X5}";
     return r.Blocks.Any(b => b.State == BlockState.Good && b.Address == Start + 6 * 256) ? null : "last block lost";
 });
+Test("fast: noise after the last block of memory does not wrap round to address 0", () =>
+{
+    const int First = 0xFFA00;
+    var top = Rom(256 * 6, 8);
+    var tone = RenderFast(top, First);
+    var random = new Random(5);
+    var x = new float[tone.Length + 48000 * 2];
+    tone.CopyTo(x, 0);
+    // 録音を止めるときの物音。音の直後で、別の実行とみなされない
+    var last = Segmenter.Find(tone, 48000, 0.0035).Where(t => t.End - t.Start > 0.15 * 48000).Last();
+    double level = Math.Sqrt(Enumerable.Range(last.Start, last.End - last.Start).Average(i => (double)tone[i] * tone[i]));
+    foreach (double at in new[] { 0.3, 1.0 })
+        for (int i = tone.Length + (int)(48000 * at); i < tone.Length + (int)(48000 * (at + 0.4)); i++) x[i] = (float)(3 * level * (random.NextDouble() - 0.5));
+    var r = Decoder.Decode(x, 48000);
+    var outside = r.Blocks.Where(b => b.Address < First).Select(b => $"{b.Address:X5}={b.State}").ToArray();
+    if (outside.Length > 0) return "blocks outside: " + string.Join(" ", outside);
+    return r.Blocks.Count(b => b.State == BlockState.Good) == 6 ? null : "read: " + string.Join(" ", r.Blocks.Select(b => $"{b.Address:X5}={b.State}"));
+});
+Test("fast: only the sound in the given range is read", () =>
+{
+    var tone = RenderFast(fastRom, Start);
+    var whole = Decoder.Decode(tone, 48000);
+    if (whole.Sound is not { } sound) return "no sound range";
+    var random = new Random(6);
+    var x = new float[48000 * 3 + tone.Length];
+    for (int i = 0; i < 48000 * 3; i++) x[i] = (float)(0.3 * (random.NextDouble() - 0.5));   // 学習用の並びに見える大きな雑音
+    tone.CopyTo(x, 48000 * 3);
+    return Check(Decoder.Decode(x, 48000, sound: (sound.From + 48000 * 3, sound.To + 48000 * 3)), fastRom, Start);
+});
+Test("multiple patterns: room noise around the sound does not add blocks or stop the reading", () =>
+{
+    var tone = RenderFast(fastRom, Start);
+    var bursts = Segmenter.Find(tone, 48000, 0.0035).Where(t => t.End - t.Start > 0.15 * 48000).ToArray();
+    var random = new Random(4);
+    for (int i = bursts[3].Start; i < bursts[3].End; i++) tone[i] += (float)(0.5 * (random.NextDouble() - 0.5));   // 1 ブロックは読めない
+    int lead = 48000 * 3, trail = 48000 * 3;
+    var pcm = new short[lead + tone.Length + trail];
+    // 音より十分小さい部屋の雑音。音量をならすと音の塊に見える
+    for (int i = 0; i < pcm.Length; i++) pcm[i] = (short)Math.Clamp(((i >= lead && i < lead + tone.Length ? tone[i - lead] : 0) + 0.002 * (random.NextDouble() - 0.5)) * 32767, -32767, 32767);
+    var r = Analyzer.Analyze(new PcmAudio([pcm, (short[])pcm.Clone()], 48000));
+    var outside = r.Blocks.Where(b => b.Address < Start || b.Address >= Start + fastRom.Length).Select(b => $"{b.Address:X5}={b.State}").ToArray();
+    if (outside.Length > 0) return "blocks outside: " + string.Join(" ", outside);
+    foreach (var b in r.Blocks.Where(b => b.State != BlockState.Failed))
+        if (!b.Data.SequenceEqual(fastRom.AsSpan(b.Address - Start, 256).ToArray())) return $"wrong data at {b.Address:X5}";
+    return r.Blocks.Count(b => b.State != BlockState.Failed) >= 5 ? null : "read: " + string.Join(" ", r.Blocks.Select(b => $"{b.Address:X5}={b.State}"));
+});
 Test("multiple patterns: an out-of-phase stereo recording is still read", () =>
 {
     var mono = RenderFast(fastRom, Start);
@@ -548,6 +594,165 @@ Test("fast: a long noise in a BASIC recording does not make it look like machine
     for (int i = x.Length / 3; i < x.Length / 3 + 48000; i++) x[i] += (float)(0.2 * (random.NextDouble() - 0.5));
     return FastDecoder.LooksFast(x, 48000) ? "detected as fast" : null;
 });
+
+// CSAVE M の音を真似る。切り替えごとに減衰する共振を鳴らす。
+PcmAudio Tape(byte[] data, int address, string name = "", int rate = 48000, double noise = 3, int seed = 1, int channels = 2, double half48 = 8.038, Action<float[]>? edit = null)
+{
+    double scale = rate / 48000.0, half = half48 * scale, longHalf = half * 2.4528, shortHalf = half * 0.98183, gap = half * 0.3377;
+    var edges = new List<double>();
+    double t = rate;
+    void Cycle(double h) { edges.Add(t); edges.Add(t + h); t += 2 * h; }
+    void Byte(int value)
+    {
+        Cycle(longHalf);
+        for (int bit = 7; bit >= 0; bit--) Cycle((value >> bit & 1) == 1 ? longHalf : shortHalf);
+        t += gap;
+    }
+    void Section(int carrier, int sync, byte[] bytes)
+    {
+        for (int i = 0; i < carrier; i++) Cycle(half);
+        for (int i = 0; i < sync; i++) Cycle(half * 2.4156);
+        for (int i = 0; i < sync; i++) Cycle(half * 0.9463);
+        Cycle(longHalf);
+        foreach (byte b in bytes) Byte(b);
+    }
+    var header = new byte[50];
+    header[0] = 1;
+    for (int i = 0; i < 16; i++) header[1 + i] = i < name.Length ? (byte)name[i] : (byte)' ';
+    header[17] = 0x0D;
+    header[18] = (byte)data.Length; header[19] = (byte)(data.Length >> 8); header[29] = (byte)(data.Length >> 16);
+    header[20] = (byte)address; header[21] = (byte)(address >> 8); header[30] = (byte)(address >> 16);
+    header[22] = header[23] = header[31] = 0xFF;
+    int count = 0;
+    for (int i = 0; i < 49; i++) count += System.Numerics.BitOperations.PopCount(header[i]);
+    header[49] = (byte)count;
+    Section(10000, 40, header);
+    t += rate * 2.0;
+    int ones = data.Sum(b => System.Numerics.BitOperations.PopCount(b));
+    Section(11000, 20, [.. data, (byte)(ones >> 8), (byte)ones]);
+    var x = new float[(int)t + rate];
+    int ring = (int)(0.004 * rate);
+    for (int e = 0; e < edges.Count; e++)
+    {
+        double at = edges[e], sign = e % 2 == 0 ? 1 : -0.4;
+        int start = (int)at;
+        for (int i = start; i < start + ring && i < x.Length; i++)
+        {
+            double u = (i - at) / rate;
+            x[i] += (float)(sign * 900 * Math.Exp(-1500 * u) * (Math.Sin(2 * Math.PI * 4600 * u) + 0.5 * Math.Sin(2 * Math.PI * 2700 * u)));
+        }
+    }
+    edit?.Invoke(x);
+    var random = new Random(seed);
+    var pcm = new short[channels][];
+    for (int c = 0; c < channels; c++)
+    {
+        pcm[c] = new short[x.Length];
+        for (int i = 0; i < x.Length; i++) pcm[c][i] = (short)Math.Clamp(x[i] + noise * (random.NextDouble() + random.NextDouble() - 1) * 1.7, -32767, 32767);
+    }
+    return new(pcm, rate);
+}
+
+byte[] TapeRom(int blocks, int seed = 3)
+{
+    var random = new Random(seed);
+    var data = new byte[blocks * 256];
+    for (int i = 0; i < data.Length; i++) data[i] = (i / 256 % 5) switch { 0 => 0, 1 => (byte)random.Next(32, 127), 2 => 0x20, _ => (byte)random.Next(256) };
+    return data;
+}
+
+// 読めないブロックは録り直せば埋まるが、誤ったデータを出してはいけない。maxFailed までの赤は許す
+string? TapeRead(DecodeResult r, byte[] data, int address, int maxFailed = 0)
+{
+    if (!r.Tape) return "not read as CSAVE M";
+    int f = r.Blocks.Count(b => b.State == BlockState.Failed);
+    if (r.Blocks.Any(b => b.State == BlockState.Good)) return "one recording turned green";
+    if (f > maxFailed) return $"failed {f} (at most {maxFailed}): " + string.Join(" | ", r.Notes);
+    if (r.Blocks.Count != data.Length / 256) return $"{r.Blocks.Count} blocks: " + string.Join(" | ", r.Notes);
+    foreach (var b in r.Blocks.Where(b => b.State != BlockState.Failed))
+    {
+        var want = data.AsSpan(b.Address - address, 256).ToArray();
+        if (!b.Data.SequenceEqual(want))
+        {
+            var bad = Enumerable.Range(0, 256).Where(i => b.Data[i] != want[i]).ToArray();
+            return $"wrong data at {b.Address:X5}: {bad.Length} bytes, first +{bad[0]}: {Convert.ToHexString(b.Data[..12])} want {Convert.ToHexString(want[..12])}";
+        }
+    }
+    return null;
+}
+
+var tapeRom = TapeRom(12);
+Test("CSAVE M: reads every block and stays yellow on one recording", () =>
+{
+    var r = Analyzer.Analyze(Tape(tapeRom, 0xC0000));
+    return TapeRead(r, tapeRom, 0xC0000) ?? (r.Notes.Any(n => n.Contains("検査値は合い") || n.Contains("check value matched")) ? null : "check value: " + string.Join(" | ", r.Notes));
+});
+Test("CSAVE M: the same content on a second recording turns green", () =>
+{
+    var image = new RomImage();
+    image.Add(TapeDecoder.Decode(Tape(tapeRom, 0xC0000)).Blocks);
+    image.Add(TapeDecoder.Decode(Tape(tapeRom, 0xC0000, seed: 2)).Blocks);
+    return image.Blocks.Count() == 12 && image.Blocks.All(b => b.State == BlockState.Good) ? null : "not green";
+});
+Test("CSAVE M: a file name does not stop it", () => TapeRead(TapeDecoder.Decode(Tape(tapeRom, 0xC0000, name: "AB")), tapeRom, 0xC0000, maxFailed: 1));
+Test("CSAVE M: a long file name does not stop it", () => TapeRead(TapeDecoder.Decode(Tape(tapeRom, 0xC0000, name: "PC-E500 MAIN ROM")), tapeRom, 0xC0000));
+Test("CSAVE M: 44.1 kHz recording", () => TapeRead(TapeDecoder.Decode(Tape(tapeRom, 0xC0000, rate: 44100)), tapeRom, 0xC0000));
+Test("CSAVE M: mono recording", () => TapeRead(TapeDecoder.Decode(Tape(tapeRom, 0xC0000, channels: 1)), tapeRom, 0xC0000));
+Test("CSAVE M: a machine with a clock 1% slower", () => TapeRead(TapeDecoder.Decode(Tape(tapeRom, 0xC0000, half48: 8.12)), tapeRom, 0xC0000));
+Test("CSAVE M: the extension ROM address and a start in the middle of memory", () => TapeRead(TapeDecoder.Decode(Tape(tapeRom, 0x30400)), tapeRom, 0x30400, maxFailed: 1));
+Test("CSAVE M: a first byte with long cycles, as in a real extension ROM", () =>
+{
+    // 実機の PC-E650 の 30000h は 0F 02 74 4F で始まる。読み始めが遅れて先頭が 01h に読めたことがある
+    var data = (byte[])tapeRom.Clone();
+    byte[] start = [0x0F, 0x02, 0x74, 0x4F];
+    start.CopyTo(data, 0);
+    return TapeRead(TapeDecoder.Decode(Tape(data, 0x30000)), data, 0x30000);
+});
+// FFh の並びを間にはさんだデータ（拡張 ROM の形）。FFh で始まる形は実機の録音で確かめた
+byte[] TapeWithRun(int runBlocks)
+{
+    var data = new byte[256 * (runBlocks + 8)];
+    Array.Fill(data, (byte)0xFF);
+    TapeRom(4).CopyTo(data, 0);
+    TapeRom(4, 9).CopyTo(data, 256 * (runBlocks + 4));
+    return data;
+}
+Test("CSAVE M: FFh runs keep their count through a noise burst, by time", () =>
+{
+    var data = TapeWithRun(16);
+    var random = new Random(5);
+    // 雑音は FFh の並びの途中に入れる（本体の開始まで約 10.4 秒、実データ 4 ブロックが約 5 秒、FFh は 1 バイト約 7.4 ms）
+    var r = TapeDecoder.Decode(Tape(data, 0x20000, edit: x => { for (int i = 48000 * 25; i < 48000 * 25 + 1440; i++) x[i] += (float)(4000 * (random.NextDouble() - 0.5)); }));
+    return TapeRead(r, data, 0x20000, maxFailed: 1);
+});
+Test("CSAVE M: a real byte inside an FFh run is not erased", () =>
+{
+    var data = TapeWithRun(8);
+    data[256 * 7 + 7] = 0xFE; data[256 * 9] = 0x00;
+    return TapeRead(TapeDecoder.Decode(Tape(data, 0x20000)), data, 0x20000);
+});
+Test("CSAVE M: a range that is not on a block boundary only uses whole blocks", () =>
+{
+    var r = TapeDecoder.Decode(Tape(tapeRom[..(256 * 8 + 40)], 0xC0010));
+    if (r.Blocks.Count != 7 || r.Blocks[0].Address != 0xC0100) return string.Join(" ", r.Blocks.Select(b => $"{b.Address:X5}={b.State}"));
+    foreach (var b in r.Blocks) if (b.State == BlockState.Failed || !b.Data.SequenceEqual(tapeRom.AsSpan(b.Address - 0xC0010, 256).ToArray())) return $"wrong at {b.Address:X5} {b.State}: {Convert.ToHexString(b.Data.Take(8).ToArray())} want {Convert.ToHexString(tapeRom.AsSpan(b.Address - 0xC0010, 8))}";
+    return null;
+});
+Test("CSAVE M: a recording that stops early keeps what was read", () =>
+{
+    var whole = Tape(tapeRom, 0xC0000);
+    int keep = whole.Length - 48000 - (int)(48000 * 1.5);
+    var r = TapeDecoder.Decode(new(whole.Channels.Select(c => c[..keep]).ToArray(), whole.Rate));
+    int read = r.Blocks.Count(b => b.State != BlockState.Failed);
+    foreach (var b in r.Blocks.Where(b => b.State != BlockState.Failed)) if (!b.Data.SequenceEqual(tapeRom.AsSpan(b.Address - 0xC0000, 256).ToArray())) return $"wrong at {b.Address:X5}: {Convert.ToHexString(b.Data.Take(8).ToArray())}";
+    return read >= 6 && read < 12 ? null : $"read {read}: " + string.Join(" | ", r.Notes);
+});
+Test("CSAVE M: BASIC and machine-code recordings are not taken for it", () =>
+{
+    PcmAudio Pcm(float[] v) => new([v.Select(s => (short)Math.Clamp(s * 32767, -32767, 32767)).ToArray()], 48000);
+    return Analyzer.TryTape(Pcm(Render(Stream(rom[..768], Start)))) != null ? "BASIC" : Analyzer.TryTape(Pcm(RenderFast(fastRom, Start))) != null ? "machine code" : null;
+});
+Test("CSAVE M: the commands for a model", () => RomModel.Main384.TapeListing.ReplaceLineEndings("|") == "CSAVE M \"A\",&H20000,&H3FFFF|CSAVE M \"A\",&HC0000,&HFFFFF" ? null : RomModel.Main384.TapeListing);
 
 Console.WriteLine(failures == 0 ? "All tests passed." : $"{failures} tests failed.");
 return failures == 0 ? 0 : 1;

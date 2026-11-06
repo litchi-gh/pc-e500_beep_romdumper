@@ -12,7 +12,7 @@ How to get BeepDump running. See the [README](../README_en.md) for how to record
 |---|---|---|
 | Windows | Windowed application (`BeepDump.exe`), command-line version (`beepdump.exe`) | Download from [Releases](https://github.com/litchi-gh/pc-e500_beep_romdumper/releases) |
 | Linux | Command-line version (`beepdump`) | [Build it](BUILD_en.md) |
-| macOS | Command-line version (`beepdump`, untested) | [Build it](BUILD_en.md) |
+| macOS | Command-line version (`beepdump`) | [Build it](BUILD_en.md) |
 
 See [System requirements in the README](../README_en.md#system-requirements) for supported OS versions and memory. It has been run on Windows 11 and on Linux (Ubuntu on WSL, x64).
 
@@ -28,7 +28,7 @@ See [System requirements in the README](../README_en.md#system-requirements) for
 
 It is not signed, so "Windows protected your PC" may appear. If so, choose "More info", then "Run anyway".
 
-The selector below the model switches the language. It starts with the language of Windows and remembers your choice.
+The selector to the right of Program switches the language. It starts with the language of Windows and remembers your choice.
 
 ![The BeepDump window after reading a real recording](figures/app_window_en.png)
 
@@ -65,8 +65,6 @@ N editions do not include Media Foundation. Install the Media Feature Pack or [f
 Running it needs no .NET.
 
 ## macOS
-
-> **Untested:** it has never been run on a Mac. These are general steps, and may not work as written.
 
 1. Build `beepdump` as in [BUILD_en.md](BUILD_en.md).
 2. Put it in place.
@@ -122,7 +120,7 @@ ffmpeg -version
 
 BeepDump uses the `ffmpeg` on your `PATH`.
 
-> **Untested:** BeepDump has never been run with the real ffmpeg. What has been tested, with a stand-in on WSL, is the arguments it passes and reading from the pipe. If it does not work, convert to WAV first as below.
+> What has been tested, with a stand-in on WSL, is the arguments it passes and reading from the pipe. If it does not work, convert to WAV first as below.
 
 ### Converting to WAV yourself
 
@@ -139,8 +137,9 @@ Do not change the level or lower the sample rate in the conversion.
 Check the command-line version in this order:
 
 ```sh
-beepdump --version          # prints something like beepdump 0.2.0
+beepdump --version          # prints something like beepdump 0.3.0
 beepdump listing --basic    # prints the listing to type in
+beepdump listing --csave    # prints the CSAVE M commands
 beepdump decode -o test.rom recording.wav    # needs --force if test.rom exists
 ```
 
@@ -148,7 +147,7 @@ The exit code of `decode` is 0 if everything was read, 1 if some is missing, and
 
 ## On the pocket computer
 
-Nothing is installed on the pocket computer. Type in the program as in the [README](../README_en.md#1-enter-the-program). With a CE-140F or a replacement, copy `BASIC/BEEPFAST.BAS` or `BASIC/BEEPDUMP.BAS` to an SD card or similar and `LOAD` it.
+Nothing is installed on the pocket computer. CSAVE M does not even need a program. For the machine-code and BASIC versions, type in the program as in the [README](../README_en.md#1-enter-the-program). With a CE-140F or a replacement, copy `BASIC/BEEPFAST.BAS` or `BASIC/BEEPDUMP.BAS` to an SD card or similar and `LOAD` it.
 
 ## Uninstalling
 
